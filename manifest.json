@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "gusthx.transfers",
+  "name": "Transfer Monitor",
+  "version": "1.0.0",
+  "author": "gusthx",
+  "description": "Live monitor for background file transfers (rsync, rclone, cp, dd, downloads, syncs) with real-time speed, current file progress, and pause/cancel controls",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Transfer Monitor",
+    "description": "Live background transfer tracker with file progress and controls",
+    "category": "System",
+    "defaultSection": "right",
+    "allowMultiple": false
+  }
+}
