@@ -554,19 +554,24 @@ def collect_all_transfers():
                 if norm_src == norm_mnt:
                     overall_total_bytes = source_fs.get("used_bytes", 0)
 
-            if overall_total_bytes > 0:
-                overall_pct = max(0.0, min(100.0, round((max(rb, wb) / overall_total_bytes * 100), 1)))
-                if active_speed > 1024:
-                    rem_overall = max(0, overall_total_bytes - max(rb, wb))
-                    if rem_overall > 0:
-                        overall_eta = format_eta(rem_overall / active_speed)
-
             elapsed_sec = 0
             try:
                 p_st = os.stat(f"/proc/{root_pid}")
-                elapsed_sec = int(now - p_st.st_mtime)
+                elapsed_sec = max(1, int(now - p_st.st_mtime))
             except Exception:
                 pass
+
+            if overall_total_bytes > 0:
+                transferred_bytes = max(rb, wb)
+                overall_pct = max(0.0, min(100.0, round((transferred_bytes / overall_total_bytes * 100), 1)))
+                rem_overall = max(0, overall_total_bytes - transferred_bytes)
+                if rem_overall > 0:
+                    # Stabilize overall ETA: blend historical average speed (70%) with smoothed speed (30%)
+                    # to prevent wild fluctuations between large files and small files.
+                    historical_speed = (transferred_bytes / elapsed_sec) if elapsed_sec > 10 else active_speed
+                    effective_speed = (0.7 * historical_speed + 0.3 * active_speed) if active_speed > 1024 else historical_speed
+                    if effective_speed > 1024:
+                        overall_eta = format_eta(rem_overall / effective_speed)
 
             category = "sync"
             if tool_name in ("curl", "wget", "aria2c", "yt-dlp"):
