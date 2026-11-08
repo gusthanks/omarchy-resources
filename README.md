@@ -48,7 +48,7 @@ No need to open multiple terminals or write custom monitoring scripts: when any 
 Install directly using the Omarchy CLI:
 
 ```bash
-omarchy plugin add https://github.com/gusthx/omarchy-transfers --enable
+omarchy plugin add https://github.com/gusthanks/omarchy-transfers --enable
 ```
 
 To reload the shell immediately:
@@ -119,4 +119,4 @@ Contributions, bug reports, and suggestions are welcome!
 
 Distributed under the MIT License. See [`LICENSE`](LICENSE) for more information.
 
-Developed with ❤️ by [Gustavo Costa (@gusthx)](https://github.com/gusthx) for the Omarchy community.
+Developed with ❤️ by [Gustavo Costa (@gusthanks)](https://github.com/gusthanks) for the Omarchy community.
