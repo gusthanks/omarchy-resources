@@ -422,10 +422,12 @@ def collect_all_transfers():
                 comm = f.read().strip()
 
             if comm in TRANSFER_COMMANDS:
-                # Filter out update checkups
+                # Filter out update checkups and daemon mounts
                 with open(f"/proc/{pid}/cmdline", "rb") as cf:
                     cmd_raw = cf.read().decode("utf-8", "replace")
                     if "checkup-db" in cmd_raw or "checkupdates" in cmd_raw or " -Q" in cmd_raw:
+                        continue
+                    if comm == "rclone" and any(sub in cmd_raw for sub in ("mount", "config", "version", "rc", "serve")):
                         continue
 
                 with open(f"/proc/{pid}/stat", "r") as f:

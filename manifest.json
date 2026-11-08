@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "id": "gusthx.transfers",
-  "name": "Transfer Monitor",
+  "id": "gusthx.resources",
+  "name": "Resource Monitor",
   "version": "1.0.0",
   "author": "gusthx",
-  "description": "Live monitor for background file transfers (rsync, rclone, cp, dd, downloads, syncs) with real-time speed, current file progress, and pause/cancel controls",
+  "description": "Complete system resource monitor with live CPU, RAM, Swap, Network, Disk I/O, Thermal Sensors, Process Manager, and Background File Transfers",
   "kinds": [
     "bar-widget"
   ],
@@ -12,8 +12,8 @@
     "barWidget": "Panel.qml"
   },
   "barWidget": {
-    "displayName": "Transfer Monitor",
-    "description": "Live background transfer tracker with file progress and controls",
+    "displayName": "Resource Monitor",
+    "description": "Live CPU, RAM, Disk, Network, Sensors, Processes & Transfers",
     "category": "System",
     "defaultSection": "right",
     "allowMultiple": false

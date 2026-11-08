@@ -1,57 +1,55 @@
-# 🚀 omarchy-transfers
+# 📊 omarchy-resources
 
-> **Transfer Monitor** — Elegant, non-intrusive background file transfer monitor for the [Omarchy](https://omarchy.org) status bar.
+> **Resource Monitor & Background Transfers** — Complete system telemetry and live file transfer monitor for the [Omarchy](https://omarchy.org) status bar.
 
 [![Omarchy Plugin](https://img.shields.io/badge/omarchy-plugin-blue?style=flat-square)](https://omarchy.org)
 [![Version](https://img.shields.io/badge/version-1.0.0-emerald?style=flat-square)](manifest.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Hyprland-purple?style=flat-square)](https://wiki.hypr.land)
 
-`omarchy-transfers` seamlessly tracks active CLI and background file transfers (`rsync`, `rclone`, `dd`, `git clone`, `curl`, `wget`, `cp`, `tar`) directly from your top bar.
-
-No need to open multiple terminals or write custom monitoring scripts: when any transfer begins anywhere on your system, the widget automatically wakes up, displays live speeds on your bar, and gives you rich progress inspection and process controls in one click.
+`omarchy-resources` is a high-performance, modular system monitor widget for Omarchy Linux (Hyprland / Quickshell). It brings together real-time hardware telemetry, live interactive process management, storage stats, hardware sensors, and background file transfer tracking under a unified, elegant popup interface.
 
 ---
 
 ## ✨ Features
 
-- **👻 Ghost State (Zero Visual Clutter):** Auto-collapses from the bar when no transfers are active. It only shows up when work is actually being done. *(Configurable to always stay visible in Settings)*.
-- **🔍 Deep Kernel Telemetry via `/proc/`:** Unlike generic desktop widgets, `omarchy-transfers` inspects `/proc/<pid>/fd/` and `/proc/<pid>/io` in real time to show:
-  - Exact file currently being written/read (with individual percentage and ETA).
-  - Overall job progress and volume transferred.
-  - Aggregated read/write throughput in MB/s.
-  - Free space on destination filesystem to prevent accidental disk full errors.
-- **⚡ Broad Tool Support:** Out-of-the-box detection for:
-  - `rsync` (Local & remote synchronizations)
-  - `rclone` (Cloud storage sync: Google Drive, S3, Nextcloud, OneDrive)
-  - `dd` (ISO disk imaging & drive flashing)
-  - `git clone` (Large repository downloads)
-  - `curl` / `wget` (CLI downloads)
-  - `cp` / `mv` / `tar` (Heavy local I/O)
-- **⏯️ Process Controls:** Pause (`SIGSTOP`), Resume (`SIGCONT`), or Cancel (`SIGTERM`) any active transfer with a single click.
-- **📂 Quick Actions:** Open the destination directory directly in your file manager (*Nautilus/Files*) or copy the full executed command to clipboard.
-- **🎨 100% Native Omarchy Theming:** Fully integrated with Quickshell, respecting Omarchy's design tokens, dynamic color schemes, typography, borders, and corner radii.
-- **⌨️ Keyboard Navigation:** Full keyboard shortcut support when the panel is open (`p` to pause/resume, `o` to open folder, `c` to copy command, `r` to refresh, `1/2/3` to switch tabs).
-
----
-
-## 📸 Preview
-
-![Transfer Monitor Panel](preview.png)
-
-*Live card showing real-time disk I/O, individual file progress (`DJI_0805.MP4`), overall progress bar, free space, and interactive action buttons.*
+- **📊 Tab 1 — System Overview:**
+  - Real-time CPU usage (User, System, IO-wait) with 60-sample historical sparkline graphs.
+  - Memory consumption (RAM Used, Available, Cached/Buffers, Swap/ZRAM).
+  - Live Network traffic (Download / Upload speed and rolling bandwidth history).
+  - Real-time Disk I/O read/write transfer rates.
+- **⚡ Tab 2 — Interactive Process Manager:**
+  - Top active processes sorted by CPU or Memory usage.
+  - Sort switcher (`s` key).
+  - Interactive process termination (`SIGTERM`) via `x` or `Delete`.
+  - Direct integration shortcut to open `btop` in terminal (`b` key).
+- **💾 Tab 3 — Disks & Storage:**
+  - Automatic detection of physical storage drives and mount points.
+  - Free space progress tracks and visual indicators.
+- **🌡️ Tab 4 — Thermal Sensors & Hardware:**
+  - Hardware thermal zone monitoring (CPU Package, Core temps, Fan RPM, Battery power/voltage).
+  - System specs: CPU model, Kernel version, GPU clock frequency, Context switch rate, and Uptime.
+- **🚀 Tab 5 — Background File Transfers (Integrated):**
+  - Live detection of CLI and background file operations (`rsync`, `rclone`, `dd`, `git clone`, `curl`, `wget`, `cp`, `tar`).
+  - Deep `/proc/<pid>/fd` inspection: displays the exact file currently being transferred, progress percentage, ETA, and overall sync progress.
+  - Interactive process controls: Pause (`p`), Resume, Cancel (`x`), Open destination folder in Nautilus (`o`), and Copy command (`c`).
+  - Ignores persistent daemons and cloud mounts (e.g. `rclone mount`) to avoid false positives.
+- **🎨 100% Native Omarchy Design:**
+  - Fully dynamic colors following the active Omarchy theme live.
+  - Multiple status bar display modes: `compact`, `detailed`, `full`, or `icon` (cycled with Right Click or `m`).
+  - Responsive keyboard shortcuts (`1` to `5` to switch tabs, `Esc` to close).
 
 ---
 
 ## 📦 Installation
 
-Install directly using the Omarchy CLI:
+Install directly with the Omarchy CLI:
 
 ```bash
-omarchy plugin add https://github.com/gusthanks/omarchy-transfers --enable
+omarchy plugin add https://github.com/gusthanks/omarchy-resources --enable
 ```
 
-To reload the shell immediately:
+Then reload the shell:
 
 ```bash
 omarchy restart shell
@@ -59,64 +57,40 @@ omarchy restart shell
 
 ---
 
-## 🛠️ Usage & Keyboard Shortcuts
+## 🛠️ Keyboard Shortcuts
 
-When transfers are active, click on the **Transfer Monitor** icon in your status bar or press `SUPER + CTRL + W` (if bound) to toggle the popover.
+When the panel is open:
 
 | Key | Action |
 |:---:|:---|
-| `1` | Switch to **Active Transfers** tab |
-| `2` | Switch to **Recent Completed** tab |
-| `3` | Switch to **Settings** tab |
-| `p` / `P` | Pause or Resume the selected transfer |
-| `o` / `O` | Open destination folder in file manager |
-| `c` / `C` | Copy executed command to clipboard |
-| `r` / `R` | Force immediate refresh of transfer telemetry |
+| `1` | Switch to **Overview** |
+| `2` | Switch to **Processes** |
+| `3` | Switch to **Disks** |
+| `4` | Switch to **Sensors & Hardware** |
+| `5` | Switch to **Transfers** |
+| `↑` / `↓` | Select process (Tab 2) or transfer (Tab 5) |
+| `s` | Toggle Process sorting (CPU / Memory) |
+| `x` | Terminate selected process (SIGTERM) or cancel transfer |
+| `p` | Pause / Resume selected transfer |
+| `o` | Open transfer destination in file manager |
+| `c` | Copy transfer command to clipboard |
+| `b` | Launch `btop` system monitor |
+| `m` | Cycle status bar mode (`compact` / `detailed` / `full` / `icon`) |
+| `r` | Force refresh telemetry |
 | `Esc` | Close panel |
 
 ---
 
-## 🏗️ Architecture
+## 🧪 Testing
 
+The data parsers and telemetry formatters are covered by automated unit tests using Vitest:
+
+```bash
+npm test
 ```
-┌────────────────────────────────────────┐
-│          Linux Kernel /proc            │
-│  /proc/<pid>/io   /proc/<pid>/fd/      │
-└───────────────────┬────────────────────┘
-                    │
-                    ▼
-┌────────────────────────────────────────┐
-│     collect-transfers.py (Engine)      │
-│  • Process tree inspection             │
-│  • Exponential Moving Average (Speed)  │
-│  • Active file descriptor tracking     │
-└───────────────────┬────────────────────┘
-                    │ JSON stdout
-                    ▼
-┌────────────────────────────────────────┐
-│       Panel.qml (Quickshell UI)        │
-│  • Reactive bar widget                 │
-│  • Omarchy BorderSurface & Theme       │
-│  • KeyboardPanel + Flickable layout    │
-└────────────────────────────────────────┘
-```
-
----
-
-## 🤝 Contributing
-
-Contributions, bug reports, and suggestions are welcome!
-
-1. Fork the Project
-2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the Branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
 
 ---
 
 ## 📄 License
 
-Distributed under the MIT License. See [`LICENSE`](LICENSE) for more information.
-
-Developed with ❤️ by [Gustavo Costa (@gusthanks)](https://github.com/gusthanks) for the Omarchy community.
+MIT © [gusthx](https://github.com/gusthanks)
