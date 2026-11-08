@@ -9,7 +9,7 @@
   "tab.settings": "Settings",
   "card.currentFile": "Current file",
   "card.source": "Source",
-  "card.destination": "Destination",
+  "card.destination": "Target",
   "card.speed": "Speed",
   "card.transferred": "Transferred",
   "card.elapsed": "Elapsed",
@@ -30,6 +30,7 @@
   "empty.active": "No transfers detected at this moment.",
   "empty.recent": "No recently completed transfers.",
   "setting.showWhenIdle": "Show in bar even when idle",
+  "setting.refreshInterval": "Refresh interval",
   "setting.notifyOnFinish": "Send desktop notification when a transfer finishes",
   "setting.hint": "Shortcuts: ↑/↓ select · p pause/resume · o open folder · c copy command · Esc close"
 }

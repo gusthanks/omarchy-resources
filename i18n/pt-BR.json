@@ -30,6 +30,7 @@
   "empty.active": "Nenhuma transferência detectada no momento.",
   "empty.recent": "Nenhuma transferência concluída recentemente.",
   "setting.showWhenIdle": "Exibir na barra mesmo quando inativo",
+  "setting.refreshInterval": "Intervalo de atualização",
   "setting.notifyOnFinish": "Notificar na área de trabalho ao concluir transferência",
   "setting.hint": "Atalhos: ↑/↓ selecionar · p pausar/continuar · o abrir pasta · c copiar comando · Esc fechar"
 }

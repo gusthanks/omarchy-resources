@@ -21,6 +21,7 @@ Panel {
 
   // ---- Settings persisted in shell.json ----
   readonly property bool showWhenIdle: Boolean(setting("showWhenIdle", false))
+  readonly property int refreshIntervalSec: Number(setting("refreshIntervalSec", 2))
 
   // ---- Live Telemetry Data ----
   property var transferData: ({
@@ -171,7 +172,7 @@ Panel {
   // Adaptive polling timer
   Timer {
     id: pollTimer
-    interval: root.opened ? 1200 : (root.hasActiveTransfers ? 1800 : 3500)
+    interval: root.opened ? Math.max(500, root.refreshIntervalSec * 1000) : (root.hasActiveTransfers ? Math.max(1000, root.refreshIntervalSec * 1000) : Math.max(2000, root.refreshIntervalSec * 1500))
     running: true
     repeat: true
     triggeredOnStart: true
@@ -287,7 +288,6 @@ Panel {
           id: mainColumn
           width: panelFlick.width
           spacing: Style.space(12)
-          onImplicitHeightChanged: console.log("DEBUG gusthx.transfers mainColumn.implicitHeight =", implicitHeight, "loadedContentHeight =", panel.loadedContentHeight)
 
           // ==================== HERO HEADER ====================
           Item {
@@ -530,38 +530,44 @@ Panel {
                   width: parent.width
                   spacing: Style.space(2)
 
-                  Row {
+                  RowLayout {
                     width: parent.width
-                    spacing: Style.space(4)
-                    PlainText {
+                    spacing: Style.space(8)
+                    Text {
+                      textFormat: Text.PlainText
                       text: tr.t("card.source") + ":"
                       color: Qt.darker(root.fgColor, 1.5)
+                      font.family: root.bar ? root.bar.fontFamily : Style.font.family
                       font.pixelSize: Style.font.caption
-                      width: Style.space(55)
+                      Layout.preferredWidth: implicitWidth
+                      Layout.minimumWidth: implicitWidth
                     }
                     PlainText {
-                      text: Model.shortenPath(modelData.source, 48)
+                      text: Model.shortenPath(modelData.source, 46)
                       color: root.fgColor
                       font.pixelSize: Style.font.caption
-                      width: parent.width - Style.space(60)
+                      Layout.fillWidth: true
                     }
                   }
 
-                  Row {
+                  RowLayout {
                     width: parent.width
-                    spacing: Style.space(4)
-                    PlainText {
+                    spacing: Style.space(8)
+                    Text {
+                      textFormat: Text.PlainText
                       text: tr.t("card.destination") + ":"
                       color: Qt.darker(root.fgColor, 1.5)
+                      font.family: root.bar ? root.bar.fontFamily : Style.font.family
                       font.pixelSize: Style.font.caption
-                      width: Style.space(55)
+                      Layout.preferredWidth: implicitWidth
+                      Layout.minimumWidth: implicitWidth
                     }
                     PlainText {
-                      text: Model.shortenPath(modelData.destination, 48)
+                      text: Model.shortenPath(modelData.destination, 46)
                       color: root.fgColor
                       font.pixelSize: Style.font.caption
                       font.bold: true
-                      width: parent.width - Style.space(60)
+                      Layout.fillWidth: true
                     }
                   }
                 }
@@ -834,6 +840,48 @@ Panel {
                 description: "Mantém o ícone visível na barra mesmo quando não houver transferências."
                 checked: root.showWhenIdle
                 onClicked: root.toggleShowWhenIdle()
+              }
+
+              PanelSeparator { width: parent.width }
+
+              Row {
+                width: parent.width
+                spacing: Style.space(12)
+
+                PlainText {
+                  text: tr.t("setting.refreshInterval")
+                  font.bold: true
+                  font.pixelSize: Style.font.body
+                  verticalAlignment: Text.AlignVCenter
+                }
+
+                SpinBox {
+                  id: refreshSpin
+                  value: root.refreshIntervalSec
+                  from: 1
+                  to: 10
+                  stepSize: 1
+                  width: Style.space(80)
+                  onValueChanged: {
+                    var entry = { id: root.moduleName }
+                    for (var k in root.settings) {
+                      if (k !== "id") entry[k] = root.settings[k]
+                    }
+                    entry["refreshIntervalSec"] = value
+                    root.settings = entry
+                    if (root.bar && root.bar.shell && typeof root.bar.shell.updateEntryInline === "function") {
+                      root.bar.shell.updateEntryInline(root.moduleName, entry)
+                    }
+                    pollTimer.interval = root.opened ? Math.max(500, value * 1000) : (root.hasActiveTransfers ? Math.max(1000, value * 1000) : Math.max(2000, value * 1500))
+                  }
+                }
+
+                PlainText {
+                  text: "s"
+                  verticalAlignment: Text.AlignVCenter
+                  color: Qt.darker(root.fgColor, 1.5)
+                  font.pixelSize: Style.font.caption
+                }
               }
 
               PanelSeparator { width: parent.width }
