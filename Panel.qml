@@ -485,7 +485,7 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: panel.loadedContent
-    contentWidth: panel.fittedContentWidth(Style.space(430))
+    contentWidth: panel.fittedContentWidth(Style.space(450))
     contentHeight: panel.fittedContentHeight(panel.loadedContentHeight)
 
     content: PanelKeyCatcher {
@@ -669,39 +669,39 @@ Panel {
         Row {
           id: tabRow
           width: parent.width
-          spacing: Style.space(6)
-          readonly property real tabWidth: (width - spacing * 4) / 5
+          spacing: Style.space(4)
+          readonly property real availWidth: width - spacing * 4
 
           TabButton {
-            width: tabRow.tabWidth
+            width: Math.round(tabRow.availWidth * 0.19)
             iconText: "󰕮"
             text: tr.t("tab.overview")
             active: root.activeTab === 0
             onClicked: root.activeTab = 0
           }
           TabButton {
-            width: tabRow.tabWidth
+            width: Math.round(tabRow.availWidth * 0.22)
             iconText: "󰒋"
             text: tr.t("tab.processes")
             active: root.activeTab === 1
             onClicked: root.activeTab = 1
           }
           TabButton {
-            width: tabRow.tabWidth
+            width: Math.round(tabRow.availWidth * 0.15)
             iconText: "󰋊"
             text: tr.t("tab.disks")
             active: root.activeTab === 2
             onClicked: root.activeTab = 2
           }
           TabButton {
-            width: tabRow.tabWidth
+            width: Math.round(tabRow.availWidth * 0.18)
             iconText: "󰔏"
             text: tr.t("tab.sensors")
             active: root.activeTab === 3
             onClicked: root.activeTab = 3
           }
           TabButton {
-            width: tabRow.tabWidth
+            width: tabRow.availWidth - Math.round(tabRow.availWidth * 0.19) - Math.round(tabRow.availWidth * 0.22) - Math.round(tabRow.availWidth * 0.15) - Math.round(tabRow.availWidth * 0.18)
             iconText: "\uf021"
             text: root.hasActiveTransfers ? (tr.t("tab.transfers") + " (" + root.transferCount + ")") : tr.t("tab.transfers")
             active: root.activeTab === 4
@@ -1907,7 +1907,7 @@ Panel {
     iconSize: Style.font.bodySmall
     foreground: root.fgColor
     fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-    horizontalPadding: Style.space(6)
+    horizontalPadding: Style.space(4)
     verticalPadding: Style.space(6)
     bordered: true
   }
