@@ -82,5 +82,14 @@
   "transfers.tool.generic": "Transferência",
   "transfers.tool.iosBackup": "Backup do iPhone/iPad",
   "transfers.tool.iosRestore": "Restauração do iPhone/iPad",
-  "transfers.tool.ios": "iPhone/iPad (%1)"
+  "transfers.tool.ios": "iPhone/iPad (%1)",
+  "transfers.all": "Todas as transferências",
+  "transfers.count": "%1 ativas",
+  "transfers.batch": "Lote",
+  "transfers.batchInfo": "rodando há %1 · %2 movidos até agora",
+  "transfers.batchSteps": "%1 rodando agora",
+  "transfers.overallEstimateSource": "Progresso geral (estimativa: tamanho da origem)",
+  "transfers.scanning": "Calculando o tamanho total…",
+  "transfers.written": "%1 gravados",
+  "transfers.transferredOf": "Transferido: %1 de %2 (%3%)"
 }

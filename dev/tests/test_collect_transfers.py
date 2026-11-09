@@ -107,7 +107,131 @@ class OtherParsers(unittest.TestCase):
                          ("rsync", "/a/", "/b/"))
 
     def test_cp_target_directory(self):
-        self.assertEqual(ct.parse_command_details(["cp", "-t", "/dst", "f1"], "/"), ("cp", "f1", "/dst"))
+        self.assertEqual(ct.parse_command_details(["cp", "-t", "/dst", "f1"], "/"), ("cp", "/f1", "/dst"))
+
+
+class Paths(unittest.TestCase):
+    def test_relative_paths_are_resolved_against_the_cwd(self):
+        self.assertEqual(ct.parse_command_details(["cp", "-r", "photos", "../backup/"], "/data/me"),
+                         ("cp", "/data/me/photos", "/data/backup/"))
+        self.assertEqual(ct.parse_command(["cp", "a", "b", "/dst"], "/w")["sources"], ["/w/a", "/w/b"])
+
+    def test_remotes_and_urls_stay_as_typed(self):
+        self.assertEqual(ct.parse_command_details(["rsync", "-a", "docs/", "host:backup/"], "/home/u"),
+                         ("rsync", "/home/u/docs/", "host:backup/"))
+        self.assertEqual(ct.parse_command_details(["rclone", "copy", "x.tar", "gdrive:b/"], "/d"),
+                         ("rclone copy", "/d/x.tar", "gdrive:b/"))
+        tool, src, dst = ct.parse_command_details(["curl", "-o", "f.iso", "https://e.org/f.iso"], "/dl")
+        self.assertEqual((src, dst), ("https://e.org/f.iso", "/dl/f.iso"))
+
+    def test_dd(self):
+        self.assertEqual(ct.parse_command_details(["dd", "if=a.img", "of=/dev/sdx"], "/w"),
+                         ("dd", "/w/a.img", "/dev/sdx"))
+
+    def test_unknown_tools_never_show_an_option_as_a_path(self):
+        self.assertEqual(ct.parse_command_details(["zstd", "-19", "big.bin"], "/w"), ("zstd", "/w/big.bin", ""))
+
+
+class Tar(unittest.TestCase):
+    def parse(self, line, cwd="/data"):
+        return ct.parse_command_details(line.split(), cwd)
+
+    def test_create(self):
+        self.assertEqual(self.parse("tar -cf phone.tar phone"), ("tar", "/data/phone", "/data/phone.tar"))
+        self.assertEqual(self.parse("tar czf /b/p.tgz a b"), ("tar", "/data/a", "/b/p.tgz"))
+        self.assertEqual(self.parse("tar --create --file=p.tar -C /src a"), ("tar", "/src/a", "/data/p.tar"))
+        self.assertEqual(ct.parse_command("tar -cf p.tar a b".split(), "/data")["sources"], ["/data/a", "/data/b"])
+
+    def test_extract(self):
+        self.assertEqual(self.parse("tar -xzf p.tgz"), ("tar", "/data/p.tgz", "/data"))
+        self.assertEqual(self.parse("tar -xf p.tar -C out"), ("tar", "/data/p.tar", "/data/out"))
+        self.assertEqual(self.parse("tar xfC p.tar /out"), ("tar", "/data/p.tar", "/out"))
+
+    def test_options_with_values(self):
+        self.assertEqual(self.parse("tar --exclude x -I zstd -cf p.tar a"), ("tar", "/data/a", "/data/p.tar"))
+        self.assertEqual(self.parse("tar -cfp.tar a"), ("tar", "/data/a", "/data/p.tar"))
+
+    def test_pipes_have_no_archive(self):
+        self.assertEqual(self.parse("tar -cf - a"), ("tar", "/data/a", ""))
+        self.assertEqual(self.parse("tar -tf p.tar"), ("tar", "/data/p.tar", ""))
+
+
+class Batch(unittest.TestCase):
+    def test_script_of(self):
+        self.assertEqual(ct.script_of(["bash", "/s/up.sh"]), "/s/up.sh")
+        self.assertEqual(ct.script_of(["/usr/bin/bash", "-eu", "up.sh", "arg"], "/s"), "/s/up.sh")
+        self.assertEqual(ct.script_of(["python3.12", "-u", "job.py"], "/s"), "/s/job.py")
+        self.assertEqual(ct.script_of(["bash", "-c", "tar cf a b"]), "")
+        self.assertEqual(ct.script_of(["bash", "-lc", "tar cf a b"]), "")
+        self.assertEqual(ct.script_of(["-bash"]), "")
+        self.assertEqual(ct.script_of(["python3", "-m", "http.server"]), "")
+        self.assertEqual(ct.script_of(["kitty", "file.sh"]), "")
+
+    def tree(self, procs):
+        # pid -> (ppid, args); every process belongs to uid 1000
+        return lambda pid: (procs[pid][0], 1000, procs[pid][1], "/w", 100) if pid in procs else None
+
+    def test_finds_the_script_through_wrappers(self):
+        read = self.tree({
+            50: (40, ["tar", "-cf", "a.tar", "a"]),
+            40: (30, ["nice", "-n", "19", "tar", "-cf", "a.tar", "a"]),
+            30: (20, ["bash", "/s/up.sh"]),
+            20: (10, ["bash", "-c", "bash /s/up.sh"]),
+            10: (1, ["kitty"]),
+        })
+        b = ct.find_batch(50, read=read, uid=1000)
+        self.assertEqual((b["pid"], b["name"], b["path"]), (30, "up.sh", "/s/up.sh"))
+
+    def test_a_command_typed_in_a_terminal_has_no_batch(self):
+        read = self.tree({50: (20, ["cp", "a", "b"]), 20: (10, ["-bash"]), 10: (1, ["kitty"])})
+        self.assertIsNone(ct.find_batch(50, read=read, uid=1000))
+
+    def test_stops_at_other_programs(self):
+        read = self.tree({50: (30, ["cp", "a", "b"]), 30: (20, ["nautilus"]), 20: (1, ["bash", "/s/x.sh"])})
+        self.assertIsNone(ct.find_batch(50, read=read, uid=1000))
+
+    def test_make(self):
+        read = self.tree({50: (30, ["sh", "-c", "rsync a b"]), 30: (1, ["make", "-j4", "deploy"])})
+        self.assertEqual(ct.find_batch(50, read=read, uid=1000)["name"], "make deploy")
+
+
+class Summary(unittest.TestCase):
+    def test_totals_and_batches(self):
+        b = {"pid": 7, "name": "up.sh"}
+        s = ct.summarize([
+            {"total_bytes": 50, "overall_total_bytes": 100, "active_speed": 5, "batch": dict(b)},
+            {"total_bytes": 300, "overall_total_bytes": 300, "active_speed": 7, "batch": dict(b)},
+        ])
+        self.assertEqual((s["total_bytes"], s["overall_total_bytes"], s["overall_pct"]), (350, 400, 87.5))
+        self.assertEqual([(x["pid"], x["transfers"], x["active_speed"]) for x in s["batches"]], [(7, 2, 12)])
+
+    def test_no_combined_progress_when_a_total_is_unknown(self):
+        s = ct.summarize([{"total_bytes": 50, "overall_total_bytes": 100, "batch": None},
+                          {"total_bytes": 9, "overall_total_bytes": 0, "batch": None}])
+        self.assertEqual((s["total_bytes"], s["overall_total_bytes"], s["batches"]), (59, 0, []))
+
+
+class SourceSize(unittest.TestCase):
+    def test_du_runs_in_the_background_and_is_read_later(self):
+        import time
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as src, \
+                mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": d}):
+            with open(os.path.join(src, "f"), "wb") as fh:
+                fh.write(b"x" * 5000)
+            self.assertEqual(ct.source_size("1-2", [src]), (0, True))
+            size = 0
+            for _ in range(100):
+                size, scanning = ct.source_size("1-2", [src])
+                if not scanning:
+                    break
+                time.sleep(0.05)
+            self.assertGreaterEqual(size, 5000)
+            ct.forget_source_sizes({"9-9"})
+            self.assertEqual([n for n in os.listdir(d) if n.startswith(ct.SIZE_FILE_PREFIX)], [])
+
+    def test_nothing_to_size(self):
+        with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": d}):
+            self.assertEqual(ct.source_size("1-2", ["/nonexistent/x"]), (0, False))
 
 
 if __name__ == "__main__":

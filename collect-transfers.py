@@ -18,6 +18,9 @@ TRANSFER_COMMANDS = {
     "git", "idevicebackup2", "restic", "borg", "btrfs", "pacman", "yay", "paru", "tar", "zstd", "ffmpeg"
 }
 
+# Tools whose folder sources are sized with du to get an overall total.
+SIZED_TOOLS = {"cp", "mv", "tar", "rsync", "rclone"}
+
 CURRENT_UID = os.getuid()
 
 
@@ -164,13 +167,19 @@ def get_active_file_info(pids, source_hint="", dest_hint=""):
 
                 # Read current file offset from fdinfo
                 pos = 0
+                flags = 0
                 fdi_path = f"/proc/{p}/fdinfo/{fd}"
                 if os.path.exists(fdi_path):
                     with open(fdi_path, "r") as fdi:
                         for l in fdi:
                             if l.startswith("pos:"):
                                 pos = int(l.split()[1])
+                            elif l.startswith("flags:"):
+                                flags = int(l.split()[1], 8)
                                 break
+                # A file open for writing grows as it is written: its size is
+                # not a total, so it has no percentage.
+                writing = (flags & 3) != 0
 
                 # Calculate hints
                 is_src_or_dst = False
@@ -181,7 +190,7 @@ def get_active_file_info(pids, source_hint="", dest_hint=""):
 
                 raw_name = os.path.basename(target)
                 pct = round((pos / st.st_size * 100), 1) if st.st_size > 0 else 0.0
-                pct = max(0.0, min(100.0, pct))
+                pct = 0.0 if writing else max(0.0, min(100.0, pct))
 
                 candidates.append({
                     "pid": p,
@@ -192,6 +201,7 @@ def get_active_file_info(pids, source_hint="", dest_hint=""):
                     "size": st.st_size,
                     "pos": pos,
                     "is_hinted": is_src_or_dst,
+                    "writing": writing,
                     "pct": pct
                 })
             except Exception:
@@ -207,7 +217,7 @@ def get_active_file_info(pids, source_hint="", dest_hint=""):
         # 1. Matches source or dest hints
         is_hinted = 1 if c["is_hinted"] else 0
         # 2. Currently actively moving (0 < pos < size)
-        is_in_flight = 1 if (0 < c["pos"] < c["size"]) else 0
+        is_in_flight = 1 if (0 < c["pos"] < c["size"] and not c["writing"]) else 0
         # 3. Clean real filename rather than rsync temp file (.filename.suffix)
         is_clean = 1 if not c["name"].startswith(".") else 0
         # 4. pos > 0
@@ -229,10 +239,181 @@ def get_active_file_info(pids, source_hint="", dest_hint=""):
     best["name"] = display_name
     return best
 
+def is_local_path(path, tool=""):
+    """False for URLs and for remotes (rsync `host:dir`, rclone `remote:dir`)."""
+    if not path or "://" in path:
+        return False
+    if path.startswith(("/", "./", "../", "~")):
+        return True
+    base = tool.split()[0] if tool else ""
+    if base in ("rsync", "rclone", "git") and ":" in path.split("/", 1)[0]:
+        return False
+    return True
+
+
+def absolute_path(path, cwd, tool=""):
+    """A relative local path resolved against the process's working directory, so
+    the panel shows where the files really are. Remotes and URLs stay as typed."""
+    if not path or not cwd or not is_local_path(path, tool) or path.startswith("~"):
+        return path
+    if os.path.isabs(path):
+        return path
+    keep_slash = path.endswith("/")
+    out = os.path.normpath(os.path.join(cwd, path))
+    return out + "/" if keep_slash and out != "/" else out
+
+
+TAR_OPTS_WITH_ARG = {
+    "-C", "--directory", "-T", "--files-from", "-X", "--exclude-from", "--exclude",
+    "-I", "--use-compress-program", "-b", "--blocking-factor", "-L", "--tape-length",
+    "-N", "--newer", "--after-date", "-g", "--listed-incremental", "-H", "--format",
+    "-V", "--label", "--transform", "--xform", "--strip-components", "--owner", "--group",
+    "--mode", "--mtime", "--checkpoint-action", "--sort", "-K", "--starting-file",
+}
+
+
+def parse_tar_args(args, cwd):
+    """Return (mode, archive, members, directory) of a tar command line: mode is
+    "c" (create/append), "x" (extract) or "t" (list). Handles bundled short
+    options (`-czf a.tgz dir`), the old style without a dash (`cf a.tar dir`),
+    `--file=a.tar` and `-C dir`."""
+    mode, archive, directory, members = "", "", "", []
+    rest = list(args[1:])
+    queue = []  # values still owed to bundled short options, in order
+    if rest and not rest[0].startswith("-") and all(ch.isalnum() for ch in rest[0]):
+        rest[0] = "-" + rest[0]  # old style: the first word is the option bundle
+        old_style = True
+    else:
+        old_style = False
+    i = 0
+    first = True
+    while i < len(rest):
+        a = rest[i]
+        i += 1
+        if a == "--":
+            members.extend(rest[i:])
+            break
+        if a.startswith("--"):
+            name, eq, value = a.partition("=")
+            if name in ("--create", "--append", "--update"):
+                mode = "c"
+            elif name in ("--extract", "--get"):
+                mode = "x"
+            elif name == "--list":
+                mode = "t"
+            elif name == "--file":
+                if eq:
+                    archive = value
+                elif i < len(rest):
+                    archive = rest[i]
+                    i += 1
+            elif name == "--directory":
+                if eq:
+                    directory = value
+                elif i < len(rest):
+                    directory = rest[i]
+                    i += 1
+            elif name in TAR_OPTS_WITH_ARG and not eq:
+                i += 1
+            continue
+        if a.startswith("-") and len(a) > 1:
+            letters = a[1:]
+            j = 0
+            while j < len(letters):
+                ch = letters[j]
+                j += 1
+                if ch in "cru":
+                    mode = "c"
+                elif ch == "x":
+                    mode = "x"
+                elif ch == "t":
+                    mode = "t"
+                elif ch == "f" or ("-" + ch) in TAR_OPTS_WITH_ARG:
+                    # The value is the rest of this word, or the next word (old
+                    # style: the next words, in the order of the letters).
+                    if letters[j:] and not (old_style and first):
+                        value = letters[j:]
+                        j = len(letters)
+                    elif i < len(rest):
+                        value = rest[i]
+                        i += 1
+                    else:
+                        value = ""
+                    if ch == "f":
+                        archive = value
+                    elif ch == "C":
+                        directory = value
+            first = False
+            continue
+        first = False
+        members.append(a)
+    return mode, archive, members, directory
+
+
 def parse_command_details(args, cwd):
-    """
-    Parse command arguments to extract user-friendly tool name, source, and destination.
-    """
+    """(tool, source, destination) of a command line; see parse_command()."""
+    info = parse_command(args, cwd)
+    return info["tool"], info["source"], info["destination"]
+
+
+def parse_command(args, cwd):
+    """Tool name, source and destination of a transfer command. Local paths come
+    back absolute (resolved against `cwd`); `sources` lists every local source,
+    for sizing the whole job."""
+    tool, src, dst, sources = _parse_command_raw(args, cwd)
+    if sources is None:
+        sources = [src] if src else []
+    return {
+        "tool": tool,
+        "source": absolute_path(src, cwd, tool),
+        "destination": absolute_path(dst, cwd, tool),
+        "sources": [absolute_path(p, cwd, tool) for p in sources if is_local_path(p, tool)],
+    }
+
+
+def _parse_command_raw(args, cwd):
+    tool, src, dst = _parse_tool_source_destination(args, cwd)
+    comm = os.path.basename(args[0]) if args else ""
+    sources = None
+    if comm == "tar":
+        mode, archive, members, directory = parse_tar_args(args, cwd)
+        base = os.path.join(cwd, directory) if directory and cwd else (directory or cwd)
+        if mode == "c":
+            members = [os.path.join(base, m) if base else m for m in members]
+            src = members[0] if members else ""
+            dst = archive if archive and archive != "-" else ""
+            sources = members
+        elif mode in ("x", "t"):
+            src = archive if archive and archive != "-" else ""
+            dst = base if mode == "x" else ""
+            sources = [src] if src else []
+        else:
+            src, dst, sources = "", "", []
+    elif comm in ("cp", "mv") and src:
+        sources = _cp_sources(args)
+    return tool, src, dst, sources
+
+
+def _cp_sources(args):
+    """Every source of a cp/mv command line (all operands but the target)."""
+    target_dir = False
+    pos_args = []
+    i = 1
+    while i < len(args):
+        arg = args[i]
+        if arg in ("-t", "--target-directory") and i + 1 < len(args):
+            target_dir = True
+            i += 2
+            continue
+        if arg.startswith("--target-directory="):
+            target_dir = True
+        elif not arg.startswith("-"):
+            pos_args.append(arg)
+        i += 1
+    return pos_args if target_dir else pos_args[:-1]
+
+
+def _parse_tool_source_destination(args, cwd):
     if not args:
         return "transfer", "", ""
     comm = os.path.basename(args[0])
@@ -300,7 +481,7 @@ def parse_command_details(args, cwd):
             if a.startswith("if="):
                 src = a[3:]
             elif a.startswith("of="):
-                dst = a[4:]
+                dst = a[3:]
         return "dd", src, dst
 
     elif comm == "rclone":
@@ -368,7 +549,9 @@ def parse_command_details(args, cwd):
             pkg_desc += f" (+{len(pkg_targets)-3})"
         return comm, f"Arch Repos ({pkg_desc})", "/var/cache/pacman/pkg"
 
-    return comm, (args[1] if len(args) > 1 else ""), (args[-1] if len(args) > 2 else "")
+    # Anything else: the first and last operands, never an option such as `-cf`.
+    operands = [a for a in args[1:] if not a.startswith("-")]
+    return comm, (operands[0] if operands else ""), (operands[-1] if len(operands) > 1 else "")
 
 # idevicebackup2 [OPTIONS] CMD [CMDOPTIONS] DIRECTORY
 IDEVICEBACKUP2_OPTS_WITH_ARG = {"-u", "--udid", "-s", "--source", "--password"}
@@ -437,6 +620,174 @@ def ios_used_bytes(udid=""):
         elif line.startswith("AmountDataAvailable:"):
             avail = int(line.split()[1])
     return max(0, total - avail) if total > 0 else 0
+
+
+SIZE_FILE_PREFIX = "gusthx-resources-size-"
+
+
+def source_size(key, paths):
+    """Total size in bytes of the sources of a transfer, when they are folders.
+    Walking a big tree takes a while, so `du` runs once per transfer in the
+    background (idle priority) and its answer is read on a later run.
+    Returns (bytes, scanning): (0, True) while du is still walking."""
+    d = runtime_dir()
+    paths = [p for p in paths if p and os.path.exists(p)]
+    if not d or not paths:
+        return 0, False
+    final = os.path.join(d, f"{SIZE_FILE_PREFIX}{key}")
+    try:
+        with open(final) as fh:
+            for line in fh:
+                parts = line.split("\t", 1)
+                if len(parts) == 2 and parts[1].strip() == "total":
+                    return int(parts[0]), False
+        return 0, False  # du answered without a total: do not ask again
+    except FileNotFoundError:
+        pass
+    except (OSError, ValueError):
+        return 0, False
+    tmp = final + ".tmp"
+    if os.path.exists(tmp):
+        return 0, True
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except OSError:
+        return 0, False
+    try:
+        cmd = ["du", "-sbc", "--"] + paths
+        script = 'out=$1; shift; "$@" > "$out.tmp" 2>/dev/null; mv -f "$out.tmp" "$out"'
+        wrapper = ["nice", "-n", "19", "sh", "-c", script, "sh", final] + cmd
+        subprocess.Popen(wrapper, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True)
+    except OSError:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        return 0, False
+    finally:
+        os.close(fd)
+    return 0, True
+
+
+def forget_source_sizes(live_keys):
+    """Drop the size files of transfers that are gone."""
+    d = runtime_dir()
+    if not d:
+        return
+    try:
+        names = os.listdir(d)
+    except OSError:
+        return
+    for name in names:
+        if not name.startswith(SIZE_FILE_PREFIX):
+            continue
+        key = name[len(SIZE_FILE_PREFIX):]
+        if key.endswith(".tmp"):
+            key = key[:-4]
+        if key not in live_keys:
+            try:
+                os.unlink(os.path.join(d, name))
+            except OSError:
+                pass
+
+
+# Programs that run a script file: the script is the "batch" its transfers belong to.
+SCRIPT_INTERPRETERS = {"bash", "sh", "dash", "zsh", "fish", "ksh", "python", "python3", "node",
+                       "perl", "ruby", "lua", "bun", "deno"}
+INTERPRETER_OPTS_WITH_ARG = {"-o", "-O", "--rcfile", "--init-file", "-W", "-X", "-r", "--require"}
+# Between a transfer and its script there may be wrappers; they are skipped.
+BATCH_PASS_THROUGH = {"nice", "ionice", "sudo", "doas", "env", "time", "timeout", "nohup", "setsid",
+                      "stdbuf", "xargs", "parallel", "find", "chrt", "taskset", "systemd-inhibit"}
+
+
+def script_of(args, cwd=""):
+    """The script file an interpreter command line runs ("" when it runs none,
+    e.g. `bash -c ...`, an interactive shell or `python -m module`)."""
+    if not args:
+        return ""
+    comm = os.path.basename(args[0]).lstrip("-")
+    base = comm.rstrip("0123456789.")
+    if base not in SCRIPT_INTERPRETERS:
+        return ""
+    i = 1
+    if base in ("bun", "deno") and len(args) > 1 and args[1] == "run":
+        i = 2
+    while i < len(args):
+        a = args[i]
+        if a in ("-c", "-m", "-e", "--eval", "-p", "--print", "-i"):
+            return ""
+        if a in INTERPRETER_OPTS_WITH_ARG:
+            i += 2
+            continue
+        if a.startswith("-"):
+            if base in ("bash", "sh", "dash", "zsh", "ksh") and not a.startswith("--") and "c" in a[1:]:
+                return ""  # bundled, e.g. `bash -lc`
+            i += 1
+            continue
+        return a if os.path.isabs(a) or not cwd else os.path.normpath(os.path.join(cwd, a))
+    return ""
+
+
+def read_proc(pid):
+    """(ppid, uid, args, cwd, start time in clock ticks) of a process, or None."""
+    try:
+        with open(f"/proc/{pid}/stat", "r") as f:
+            data = f.read()
+        fields = data[data.rindex(")") + 2:].split()
+        ppid, start = int(fields[1]), int(fields[19])
+        uid = os.stat(f"/proc/{pid}").st_uid
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            args = [a for a in f.read().decode("utf-8", "replace").split("\x00") if a]
+        try:
+            cwd = os.readlink(f"/proc/{pid}/cwd")
+        except OSError:
+            cwd = ""
+        return ppid, uid, args, cwd, start
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def find_batch(pid, read=read_proc, uid=None):
+    """The script a transfer was started by: the nearest ancestor that is an
+    interpreter running a script file (`bash backup.sh`), or a `make`/`just`
+    run. Shells running `-c` and wrappers such as nice or sudo are looked
+    through; anything else (a terminal, an editor, an agent) ends the search,
+    and the transfer then belongs to no batch. Returns a dict or None."""
+    uid = CURRENT_UID if uid is None else uid
+    info = read(pid)
+    seen = set()
+    while info:
+        ppid = info[0]
+        if ppid <= 1 or ppid in seen:
+            return None
+        seen.add(ppid)
+        info = read(ppid)
+        if not info or info[1] != uid or not info[2]:
+            return None
+        args, cwd = info[2], info[3]
+        comm = os.path.basename(args[0]).lstrip("-")
+        script = script_of(args, cwd)
+        if script:
+            return {"pid": ppid, "name": os.path.basename(script), "path": script,
+                    "command": " ".join(args), "cwd": cwd, "start_ticks": info[4]}
+        if comm in ("make", "gmake", "just", "ninja"):
+            return {"pid": ppid, "name": " ".join([comm] + [a for a in args[1:] if not a.startswith("-")][:2]),
+                    "path": cwd, "command": " ".join(args), "cwd": cwd, "start_ticks": info[4]}
+        if comm.rstrip("0123456789.") in SCRIPT_INTERPRETERS or comm in BATCH_PASS_THROUGH:
+            continue
+        return None
+    return None
+
+
+def process_elapsed(start_ticks, now):
+    """Seconds a process has been running, from its start time in clock ticks."""
+    try:
+        with open("/proc/uptime") as f:
+            uptime = float(f.read().split()[0])
+        return max(1, int(uptime - start_ticks / os.sysconf("SC_CLK_TCK")))
+    except (OSError, ValueError):
+        return 0
 
 
 def get_filesystem_info(path):
@@ -553,6 +904,7 @@ def collect_all_transfers():
     root_pids = [pid for pid, info in candidates.items() if info["ppid"] not in candidates]
 
     transfers = []
+    live_size_keys = set()
     total_agg_read_speed = 0.0
     total_agg_write_speed = 0.0
     active_pid_set = set(str(p) for p in root_pids)
@@ -601,7 +953,10 @@ def collect_all_transfers():
             except Exception:
                 pass
 
-            tool_name, src_path, dst_path = parse_command_details(args, cwd)
+            parsed = parse_command(args, cwd)
+            tool_name, src_path, dst_path = parsed["tool"], parsed["source"], parsed["destination"]
+            if tool_name == "tar" and not src_path and not dst_path:
+                continue  # tar in a pipe with nothing to show (e.g. `tar -t`)
             tree_pids = get_process_tree(root_pid)
             rb, wb, rss, state = get_tree_io_and_stat(tree_pids)
 
@@ -633,7 +988,7 @@ def collect_all_transfers():
             active_file = get_active_file_info(tree_pids, src_path, dst_path)
 
             file_eta_str = ""
-            if active_file and active_speed > 1024:
+            if active_file and active_speed > 1024 and not active_file["writing"]:
                 rem_bytes = max(0, active_file["size"] - active_file["pos"])
                 if rem_bytes > 0:
                     file_eta_str = format_eta(rem_bytes / active_speed)
@@ -652,6 +1007,7 @@ def collect_all_transfers():
             overall_total_bytes = 0
             overall_pct = 0.0
             overall_eta = ""
+            overall_estimate_kind = "source"
 
             if src_path and os.path.isfile(src_path):
                 try:
@@ -666,6 +1022,18 @@ def collect_all_transfers():
                     overall_total_bytes = source_fs.get("used_bytes", 0)
 
             overall_is_estimate = False
+            overall_scanning = False
+            proc_info = read_proc(root_pid)
+            size_key = f"{root_pid}-{proc_info[4]}" if proc_info else str(root_pid)
+            live_size_keys.add(size_key)
+            base_tool = tool_name.split()[0]
+            if (overall_total_bytes == 0 and base_tool in SIZED_TOOLS
+                    and any(os.path.isdir(p) for p in parsed["sources"])):
+                # A folder: its size is worked out once, in the background.
+                overall_total_bytes, overall_scanning = source_size(size_key, parsed["sources"])
+                # rsync and rclone skip what the destination already has.
+                overall_is_estimate = overall_total_bytes > 0 and base_tool in ("rsync", "rclone")
+
             if tool_name == "idevicebackup2 backup" and overall_total_bytes == 0:
                 # The backup size is not known up front: use the space used on the
                 # device, worked out once per backup and kept in the state file.
@@ -675,6 +1043,17 @@ def collect_all_transfers():
                     _sub, udid, _dst = parse_idevicebackup2_args(args, cwd)
                     overall_total_bytes = ios_used_bytes(udid)
                 overall_is_estimate = overall_total_bytes > 0
+                overall_estimate_kind = "device"
+
+            batch = find_batch(root_pid)
+            if batch:
+                b_tree = get_process_tree(batch["pid"])
+                # A process's I/O counters keep what its finished children did,
+                # so this is everything the script moved so far.
+                b_rb, b_wb, _rss, _state = get_tree_io_and_stat(b_tree)
+                batch["total_bytes"] = max(b_rb, b_wb)
+                batch["elapsed_sec"] = process_elapsed(batch.pop("start_ticks"), now)
+                batch["elapsed_str"] = format_eta(batch["elapsed_sec"])
 
             elapsed_sec = 0
             try:
@@ -741,7 +1120,10 @@ def collect_all_transfers():
                 "overall_total_bytes": overall_total_bytes,
                 "overall_pct": overall_pct,
                 "overall_eta": overall_eta,
-                "overall_is_estimate": overall_is_estimate
+                "overall_is_estimate": overall_is_estimate,
+                "overall_estimate_kind": overall_estimate_kind if overall_is_estimate else "",
+                "overall_scanning": overall_scanning,
+                "batch": batch
             }
             transfers.append(item_data)
 
@@ -757,15 +1139,26 @@ def collect_all_transfers():
                 "tool": tool_name,
                 "source": src_path,
                 "destination": dst_path,
-                "estimated_total_bytes": overall_total_bytes if overall_is_estimate else 0
+                "estimated_total_bytes": overall_total_bytes if overall_estimate_kind == "device" and overall_is_estimate else 0
             }
         except Exception:
             pass
 
     save_current_state(new_processes, recent_completed)
+    forget_source_sizes(live_size_keys)
+
+    # Transfers of one script stay together, in the order they started.
+    transfers.sort(key=lambda t: (t["batch"]["pid"] if t["batch"] else t["pid"], t["pid"]))
+    summary = summarize(transfers)
 
     result = {
         "timestamp": now,
+        "home": os.path.expanduser("~"),
+        "agg_total_bytes": summary["total_bytes"],
+        "agg_overall_total_bytes": summary["overall_total_bytes"],
+        "agg_overall_pct": summary["overall_pct"],
+        "agg_overall_is_estimate": summary["overall_is_estimate"],
+        "batches": summary["batches"],
         "count": len(transfers),
         "agg_read_speed": round(total_agg_read_speed),
         "agg_write_speed": round(total_agg_write_speed),
@@ -774,6 +1167,33 @@ def collect_all_transfers():
         "recent_completed": recent_completed[:5]
     }
     return result
+
+def summarize(transfers):
+    """Totals over every active transfer, and one entry per batch (script).
+    The combined progress only exists when every transfer knows its total."""
+    total = sum(t.get("total_bytes", 0) for t in transfers)
+    known = [t for t in transfers if t.get("overall_total_bytes", 0) > 0]
+    overall = pct = 0
+    if transfers and len(known) == len(transfers):
+        overall = sum(t["overall_total_bytes"] for t in known)
+        done = sum(min(t.get("total_bytes", 0), t["overall_total_bytes"]) for t in known)
+        pct = round(done / overall * 100, 1) if overall > 0 else 0
+    batches = {}
+    for t in transfers:
+        b = t.get("batch")
+        if not b:
+            continue
+        entry = batches.setdefault(b["pid"], dict(b, transfers=0, active_speed=0))
+        entry["transfers"] += 1
+        entry["active_speed"] += t.get("active_speed", 0)
+    return {
+        "total_bytes": total,
+        "overall_total_bytes": overall,
+        "overall_pct": pct,
+        "overall_is_estimate": any(t.get("overall_is_estimate") for t in known) if overall else False,
+        "batches": list(batches.values()),
+    }
+
 
 def handle_action(action, target):
     """Execute interactive actions: pause, resume, cancel, open, copy."""

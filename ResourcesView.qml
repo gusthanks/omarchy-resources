@@ -736,12 +736,13 @@ PanelKeyCatcher {
                 }
 
                 PlainText {
-                  text: tr.t("transfers.pid").arg(modelData.pid)
+                  text: modelData.batch ? modelData.batch.name : tr.t("transfers.pid").arg(modelData.pid)
                   color: Qt.darker(monitor.fgColor, 1.45)
                   font.pixelSize: Style.font.caption
+                  elide: Text.ElideMiddle
+                  Layout.fillWidth: true
                 }
 
-                Item { Layout.fillWidth: true }
 
                 PlainText {
                   text: Model.formatSpeed(modelData.active_speed)
@@ -754,8 +755,8 @@ PanelKeyCatcher {
               PlainText {
                 visible: Boolean(modelData.destination || modelData.source)
                 text: modelData.source && modelData.destination
-                  ? (Model.shortenPath(modelData.source) + " → " + Model.shortenPath(modelData.destination))
-                  : Model.shortenPath(modelData.source || modelData.destination)
+                  ? (Model.transferPath(modelData.source, monitor.transferData.home) + " → " + Model.transferPath(modelData.destination, monitor.transferData.home))
+                  : Model.transferPath(modelData.source || modelData.destination, monitor.transferData.home)
                 color: Qt.darker(monitor.fgColor, 1.35)
                 font.pixelSize: Style.font.caption
                 elide: Text.ElideMiddle
@@ -1306,6 +1307,104 @@ PanelKeyCatcher {
         }
       }
 
+      // Everything at once: count, combined speed and progress, and the
+      // scripts (batches) the transfers belong to.
+      SurfaceCard {
+        visible: monitor.transferList.length > 0
+
+        Column {
+          width: parent.width
+          spacing: Style.space(6)
+
+          RowLayout {
+            width: parent.width
+            spacing: Style.space(8)
+            PlainText {
+              text: tr.t("transfers.all").toUpperCase()
+              color: Qt.darker(monitor.fgColor, 1.25)
+              font.bold: true
+              font.pixelSize: Style.font.caption
+            }
+            PlainText {
+              text: tr.t("transfers.count").arg(monitor.transferCount)
+              color: Qt.darker(monitor.fgColor, 1.45)
+              font.pixelSize: Style.font.caption
+            }
+            Item { Layout.fillWidth: true }
+            PlainText {
+              text: Model.formatSpeed(monitor.aggTransferSpeed)
+              color: monitor.accentColor
+              font.bold: true
+              font.pixelSize: Style.font.bodySmall
+            }
+          }
+
+          ProgressBarTrack {
+            visible: (monitor.transferData.agg_overall_total_bytes || 0) > 0
+            width: parent.width
+            height: Style.space(6)
+            fraction: Math.min(1.0, Math.max(0.0, (monitor.transferData.agg_overall_pct || 0) / 100.0))
+            fillColor: monitor.accentColor
+          }
+
+          PlainText {
+            width: parent.width
+            text: (monitor.transferData.agg_overall_total_bytes || 0) > 0
+              ? tr.t("transfers.transferredOf").arg(Model.formatBytes(monitor.transferData.agg_total_bytes || 0))
+                  .arg((monitor.transferData.agg_overall_is_estimate ? "≈ " : "") + Model.formatBytes(monitor.transferData.agg_overall_total_bytes))
+                  .arg(monitor.transferData.agg_overall_pct || 0)
+              : tr.t("transfers.transferred").arg(Model.formatBytes(monitor.transferData.agg_total_bytes || 0))
+            color: Qt.darker(monitor.fgColor, 1.3)
+            font.pixelSize: Style.font.caption
+          }
+
+          Repeater {
+            model: monitor.transferData.batches || []
+
+            Column {
+              required property var modelData
+              width: parent.width
+              spacing: Style.space(1)
+
+              RowLayout {
+                width: parent.width
+                spacing: Style.space(6)
+                PlainText {
+                  text: "\uf0ae"
+                  color: monitor.accentColor
+                  font.pixelSize: Style.font.caption
+                }
+                PlainText {
+                  text: tr.t("transfers.batch") + ": " + modelData.name
+                  font.bold: true
+                  font.pixelSize: Style.font.caption
+                  elide: Text.ElideMiddle
+                  Layout.fillWidth: true
+                }
+                PlainText {
+                  text: tr.t("transfers.batchSteps").arg(modelData.transfers)
+                  color: Qt.darker(monitor.fgColor, 1.45)
+                  font.pixelSize: Style.font.caption
+                }
+              }
+              PlainText {
+                width: parent.width
+                text: tr.t("transfers.batchInfo").arg(modelData.elapsed_str || "").arg(Model.formatBytes(modelData.total_bytes || 0))
+                color: Qt.darker(monitor.fgColor, 1.4)
+                font.pixelSize: Style.font.caption
+              }
+              PlainText {
+                width: parent.width
+                text: Model.tildePath(modelData.path, monitor.transferData.home)
+                color: Qt.darker(monitor.fgColor, 1.6)
+                font.pixelSize: Style.font.caption
+                elide: Text.ElideMiddle
+              }
+            }
+          }
+        }
+      }
+
       // Active transfers cards
       Repeater {
         id: transferRepeater
@@ -1406,6 +1505,30 @@ PanelKeyCatcher {
               }
             }
 
+            // The script this transfer is a step of
+            RowLayout {
+              visible: Boolean(modelData.batch)
+              width: parent.width
+              spacing: Style.space(6)
+              PlainText {
+                text: "\uf0ae"
+                color: monitor.accentColor
+                font.pixelSize: Style.font.caption
+              }
+              PlainText {
+                text: modelData.batch ? tr.t("transfers.batch") + ": " + modelData.batch.name : ""
+                font.bold: true
+                font.pixelSize: Style.font.caption
+                elide: Text.ElideMiddle
+                Layout.fillWidth: true
+              }
+              PlainText {
+                text: modelData.batch ? tr.t("transfers.pid").arg(modelData.batch.pid) : ""
+                color: Qt.darker(monitor.fgColor, 1.45)
+                font.pixelSize: Style.font.caption
+              }
+            }
+
             // Path Flow: Source -> Destination
             Column {
               width: parent.width
@@ -1416,6 +1539,7 @@ PanelKeyCatcher {
                 width: parent.width
                 spacing: Style.space(8)
                 Text {
+                  Layout.alignment: Qt.AlignTop
                   textFormat: Text.PlainText
                   text: tr.t("transfers.source") + ":"
                   color: Qt.darker(monitor.fgColor, 1.5)
@@ -1424,17 +1548,22 @@ PanelKeyCatcher {
                   Layout.preferredWidth: implicitWidth
                 }
                 PlainText {
-                  text: Model.shortenPath(modelData.source, 46)
+                  // The whole path, on up to two lines: where it is matters.
+                  text: Model.transferPath(modelData.source, monitor.transferData.home, 84)
                   color: monitor.fgColor
                   font.pixelSize: Style.font.caption
+                  wrapMode: Text.WrapAnywhere
+                  maximumLineCount: 2
                   Layout.fillWidth: true
                 }
               }
 
               RowLayout {
+                visible: Boolean(modelData.destination)
                 width: parent.width
                 spacing: Style.space(8)
                 Text {
+                  Layout.alignment: Qt.AlignTop
                   textFormat: Text.PlainText
                   text: tr.t("transfers.destination") + ":"
                   color: Qt.darker(monitor.fgColor, 1.5)
@@ -1443,10 +1572,13 @@ PanelKeyCatcher {
                   Layout.preferredWidth: implicitWidth
                 }
                 PlainText {
-                  text: Model.shortenPath(modelData.destination, 46)
+                  // The whole path, on up to two lines: where it is matters.
+                  text: Model.transferPath(modelData.destination, monitor.transferData.home, 84)
                   color: monitor.fgColor
                   font.pixelSize: Style.font.caption
                   font.bold: true
+                  wrapMode: Text.WrapAnywhere
+                  maximumLineCount: 2
                   Layout.fillWidth: true
                 }
               }
@@ -1477,7 +1609,8 @@ PanelKeyCatcher {
                     font.pixelSize: Style.font.bodySmall
                   }
                   PlainText {
-                    text: modelData.overall_is_estimate ? tr.t("transfers.overallEstimate") : tr.t("transfers.overall")
+                    text: !modelData.overall_is_estimate ? tr.t("transfers.overall")
+                      : modelData.overall_estimate_kind === "source" ? tr.t("transfers.overallEstimateSource") : tr.t("transfers.overallEstimate")
                     font.bold: true
                     font.pixelSize: Style.font.bodySmall
                   }
@@ -1500,6 +1633,14 @@ PanelKeyCatcher {
                   font.pixelSize: Style.font.caption
                 }
               }
+            }
+
+            PlainText {
+              visible: Boolean(modelData.overall_scanning)
+              width: parent.width
+              text: "\uf021  " + tr.t("transfers.scanning")
+              color: Qt.darker(monitor.fgColor, 1.4)
+              font.pixelSize: Style.font.caption
             }
 
             // Active file progress
@@ -1535,6 +1676,8 @@ PanelKeyCatcher {
                 }
 
                 ProgressBarTrack {
+                  // A file being written has no known final size: no bar.
+                  visible: !(modelData.active_file && modelData.active_file.writing)
                   width: parent.width
                   height: Style.space(6)
                   fraction: modelData.active_file ? Math.min(1.0, Math.max(0.0, modelData.active_file.pct / 100.0)) : 0
@@ -1544,9 +1687,9 @@ PanelKeyCatcher {
                 PlainText {
                   width: parent.width
                   horizontalAlignment: Text.AlignRight
-                  text: modelData.active_file
-                    ? Model.formatBytes(modelData.active_file.pos) + " / " + Model.formatBytes(modelData.active_file.size) + " (" + modelData.active_file.pct + "%)" + (modelData.file_eta ? " · " + tr.t("transfers.eta").arg(modelData.file_eta) : "")
-                    : ""
+                  text: !modelData.active_file ? ""
+                    : modelData.active_file.writing ? tr.t("transfers.written").arg(Model.formatBytes(modelData.active_file.size))
+                    : Model.formatBytes(modelData.active_file.pos) + " / " + Model.formatBytes(modelData.active_file.size) + " (" + modelData.active_file.pct + "%)" + (modelData.file_eta ? " · " + tr.t("transfers.eta").arg(modelData.file_eta) : "")
                   color: Qt.darker(monitor.fgColor, 1.4)
                   font.pixelSize: Style.font.caption
                 }

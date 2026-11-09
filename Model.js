@@ -490,6 +490,7 @@ function toolDisplayTitle(tool, tr) {
   if (t.indexOf("git") >= 0) return "git"
   if (t.indexOf("cp") >= 0) return "cp"
   if (t.indexOf("mv") >= 0) return "mv"
+  if (t.indexOf("tar") === 0) return "tar"
   if (t.indexOf("dd") >= 0) return "dd"
   return tool
 }
@@ -529,12 +530,29 @@ function shortenPath(p, maxLen) {
   if (parts.length <= 2) {
     return s.substring(0, maxLen - 3) + "…"
   }
+  // "~/a/b" (see tildePath) keeps its "~"; anything else keeps the leading "/".
+  var lead = parts[0] === "~" ? "" : "/"
   var first = parts[0]
   var last = parts[parts.length - 1]
   var prev = parts[parts.length - 2]
-  var combined = "/" + first + "/…/" + prev + "/" + last
+  var combined = lead + first + "/…/" + prev + "/" + last
   if (combined.length <= maxLen) return combined
-  return "/" + first + "/…/" + last
+  return lead + first + "/…/" + last
+}
+
+// "/home/me/x" as "~/x": the home folder is noise in a path the user reads.
+function tildePath(p, home) {
+  if (!p) return ""
+  var s = String(p)
+  var h = home ? String(home).replace(/\/+$/, "") : ""
+  if (!h || h === "/") return s
+  if (s === h) return "~"
+  return s.indexOf(h + "/") === 0 ? "~" + s.substring(h.length) : s
+}
+
+// The path of a transfer as the panel shows it: whole when it fits in maxLen.
+function transferPath(p, home, maxLen) {
+  return shortenPath(tildePath(p, home), maxLen || 38)
 }
 
 function parseJsonSafely(str, fallback) {
@@ -555,7 +573,7 @@ if (typeof module !== "undefined" && module.exports) {
     parseDetailsOutput: parseDetailsOutput, formatBytes: formatBytes, formatShortBytes: formatShortBytes,
     formatRate: formatRate, formatShortRate: formatShortRate, formatSpeed: formatSpeed,
     formatDuration: formatDuration, translate: translate, toolIcon: toolIcon, toolDisplayTitle: toolDisplayTitle,
-    formatRecentTransfer: formatRecentTransfer, diskOpenPath: diskOpenPath, shortenPath: shortenPath,
+    formatRecentTransfer: formatRecentTransfer, diskOpenPath: diskOpenPath, shortenPath: shortenPath, tildePath: tildePath, transferPath: transferPath,
     parseJsonSafely: parseJsonSafely
   }
 }

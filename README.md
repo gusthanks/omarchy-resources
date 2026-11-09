@@ -25,14 +25,18 @@ downloads, iPhone/iPad backups and more) with speed, progress and ETA.
   `tar`, `zstd` and `ffmpeg` started by you. Each shows speed, the file being copied,
   overall progress and ETA when the total size is known, and can be paused, resumed,
   cancelled, opened or copied as a command. A notification tells you when a long transfer
-  finishes.
+  finishes. Paths are shown in full (relative ones resolved against the command's working
+  directory), a folder's total size is worked out in the background with `du`, and a card
+  at the top adds everything up. A transfer started by a script (`bash backup.sh`, a
+  Python script, `make`) is shown as a step of that **batch**, with the script's path, how
+  long it has been running and how much it has moved so far.
 - **iPhone/iPad backups** (`idevicebackup2 backup`): the backup size is not known up front,
   so progress and ETA are estimated from the space used on the device and marked with
   **≈** and *(estimate)*.
 - Follows the Omarchy theme live, and speaks English and Portuguese (Brazil and Portugal).
 
 <p align="center">
-  <img src="docs/transfers.png" width="270" alt="Transfers: an rsync with overall and per-file progress, and an iPhone backup with estimated progress">
+  <img src="docs/transfers.png" width="270" alt="Transfers: the combined total and the batch script, an rsync with overall and per-file progress, and an iPhone backup with estimated progress">
   <img src="docs/processes.png" width="270" alt="Processes sorted by CPU">
   <img src="docs/disks.png" width="270" alt="Disks, including a connected iPhone">
 </p>
@@ -115,6 +119,8 @@ What it **writes**, only in your per-user runtime directory (`$XDG_RUNTIME_DIR`,
 
 - `gusthx-resources-transfers.json`: the transfers seen in the last run (commands, paths,
   byte counters) and the last few finished ones, to compute speeds.
+- `gusthx-resources-size-<pid>-<start>`: the size `du` found for the folders a running
+  transfer reads; removed when the transfer ends.
 - `gusthx-resources-ios.tsv`: connected iPhones/iPads (name, model, storage, UDID), cached
   for 30 seconds.
 

@@ -35,7 +35,7 @@ const {
   MAX_HISTORY, neutralizeMarkup, clamp, pushHistory, parseProcStat, parseProcMeminfo,
   parseProcLoadavg, parseProcUptime, parseProcNetDev, parseProcDiskstats, parseDetailsOutput,
   formatBytes, formatShortBytes, formatRate, formatShortRate, formatSpeed, formatDuration,
-  toolIcon, toolDisplayTitle, formatRecentTransfer, diskOpenPath, shortenPath, parseJsonSafely
+  toolIcon, toolDisplayTitle, formatRecentTransfer, diskOpenPath, shortenPath, tildePath, transferPath, parseJsonSafely
 } = mod.exports
 
 describe('gusthx.resources Model.js', () => {
@@ -475,6 +475,24 @@ MemFree:        4096000 kB`
     it('handles empty and short paths', () => {
       expect(shortenPath('')).toBe('')
       expect(shortenPath('/home/gusthx/file.txt')).toBe('/home/gusthx/file.txt')
+    })
+    it('keeps the root and the last folders of a long path', () => {
+      expect(shortenPath('/mnt/disk/a/b/c/photos/img.tar', 24)).toBe('/mnt/…/photos/img.tar')
+      expect(shortenPath('~/a/b/c/d/photos/img.tar', 20)).toBe('~/…/photos/img.tar')
+    })
+  })
+
+  describe('tildePath and transferPath', () => {
+    it('shows the home folder as ~', () => {
+      expect(tildePath('/home/me/x/y', '/home/me')).toBe('~/x/y')
+      expect(tildePath('/home/me', '/home/me/')).toBe('~')
+      expect(tildePath('/home/meow/x', '/home/me')).toBe('/home/meow/x')
+      expect(tildePath('/mnt/x', '')).toBe('/mnt/x')
+      expect(tildePath('gdrive:b/', '/home/me')).toBe('gdrive:b/')
+    })
+    it('shortens after replacing the home folder', () => {
+      expect(transferPath('/home/me/a.tar', '/home/me', 10)).toBe('~/a.tar')
+      expect(transferPath('', '/home/me')).toBe('')
     })
   })
 
