@@ -394,6 +394,16 @@ Panel {
   function resumeTransfer(pid) { runTransferAction("--resume", pid) }
   function cancelTransfer(pid) { runTransferAction("--cancel", pid) }
   function openTransferPath(path) { if (path) runTransferAction("--open", path) }
+  function openDiskFolder(mountPath) {
+    if (!mountPath) return
+    var target = String(mountPath).trim()
+    if (target.indexOf("·") >= 0 || target.indexOf("•") >= 0) {
+      var parts = target.split(/[·•]/).map(function(s) { return s.trim() })
+      target = parts.indexOf("/home") >= 0 ? "/home" : parts[0]
+    }
+    root.close()
+    Quickshell.execDetached(["nautilus", target])
+  }
   function copyTransferText(str) {
     if (str) {
       runTransferAction("--copy", str)
@@ -440,11 +450,28 @@ Panel {
     onTriggered: root.refreshDetails()
   }
 
+  function resetTabScroll() {
+    var c = panel.loadedContent
+    if (c && typeof c.resetScroll === "function") {
+      c.resetScroll()
+    }
+  }
+
+  function scrollBy(delta) {
+    var c = panel.loadedContent
+    if (c && typeof c.scrollBy === "function") {
+      c.scrollBy(delta)
+    }
+  }
+
+  onActiveTabChanged: root.resetTabScroll()
+
   onOpenedChanged: {
     if (opened) {
       sampleFastMetrics()
       refreshDetails()
       pollTransfers()
+      root.resetTabScroll()
     }
   }
 
@@ -491,7 +518,33 @@ Panel {
     content: PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
-      implicitHeight: mainColumn.implicitHeight
+      implicitHeight: headerColumn.implicitHeight + Style.space(12) + tabContentColumn.implicitHeight
+
+      function resetScroll() {
+        if (tabScrollView && tabScrollView.contentItem) {
+          tabScrollView.contentItem.contentY = 0
+        }
+      }
+
+      function scrollBy(delta) {
+        if (tabScrollView && tabScrollView.contentItem) {
+          var flick = tabScrollView.contentItem
+          var maxScroll = Math.max(0, flick.contentHeight - tabScrollView.height)
+          flick.contentY = Math.max(0, Math.min(maxScroll, flick.contentY + delta))
+        }
+      }
+
+      function ensureVisible(topY, itemH) {
+        if (tabScrollView && tabScrollView.contentItem) {
+          var flick = tabScrollView.contentItem
+          var itemBottom = topY + itemH
+          if (itemBottom > flick.contentY + tabScrollView.height) {
+            flick.contentY = Math.max(0, itemBottom - tabScrollView.height + Style.space(8))
+          } else if (topY < flick.contentY) {
+            flick.contentY = Math.max(0, topY - Style.space(8))
+          }
+        }
+      }
 
       onCloseRequested: root.close()
       onTabRequested: function(direction) {
@@ -504,11 +557,15 @@ Panel {
           var list = root.currentProcList()
           if (list.length > 0) {
             root.selectedProcIndex = Math.max(0, Math.min(list.length - 1, root.selectedProcIndex + dy))
+            keyCatcher.ensureVisible(Style.space(80) + root.selectedProcIndex * Style.space(36), Style.space(32))
           }
         } else if (dy !== 0 && root.activeTab === 4) {
           if (root.transferList.length > 0) {
             root.selectedTransferIndex = Math.max(0, Math.min(root.transferList.length - 1, root.selectedTransferIndex + dy))
+            keyCatcher.ensureVisible(Style.space(40) + root.selectedTransferIndex * Style.space(80), Style.space(70))
           }
+        } else if (dy !== 0) {
+          keyCatcher.scrollBy(dy * Style.space(60))
         }
       }
       onDeleteRequested: {
@@ -552,8 +609,27 @@ Panel {
         }
       }
 
+      Keys.onPressed: function(event) {
+        if (event.key === Qt.Key_PageDown) {
+          keyCatcher.scrollBy(Style.space(220))
+          event.accepted = true
+        } else if (event.key === Qt.Key_PageUp) {
+          keyCatcher.scrollBy(-Style.space(220))
+          event.accepted = true
+        } else if (event.key === Qt.Key_Home) {
+          keyCatcher.resetScroll()
+          event.accepted = true
+        } else if (event.key === Qt.Key_End) {
+          if (tabScrollView && tabScrollView.contentItem) {
+            var flick = tabScrollView.contentItem
+            flick.contentY = Math.max(0, flick.contentHeight - tabScrollView.height)
+            event.accepted = true
+          }
+        }
+      }
+
       Column {
-        id: mainColumn
+        id: headerColumn
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
@@ -670,38 +746,40 @@ Panel {
           id: tabRow
           width: parent.width
           spacing: Style.space(4)
-          readonly property real availWidth: width - spacing * 4
+          readonly property real iconTabWidth: Style.space(38)
+          readonly property real remWidth: width - iconTabWidth - spacing * 4
 
           TabButton {
-            width: Math.round(tabRow.availWidth * 0.19)
+            width: tabRow.iconTabWidth
             iconText: "󰕮"
-            text: tr.t("tab.overview")
+            iconSize: Style.font.body
+            tooltipText: tr.t("tab.overview")
             active: root.activeTab === 0
             onClicked: root.activeTab = 0
           }
           TabButton {
-            width: Math.round(tabRow.availWidth * 0.22)
+            width: Math.round(tabRow.remWidth * 0.28)
             iconText: "󰒋"
             text: tr.t("tab.processes")
             active: root.activeTab === 1
             onClicked: root.activeTab = 1
           }
           TabButton {
-            width: Math.round(tabRow.availWidth * 0.15)
+            width: Math.round(tabRow.remWidth * 0.20)
             iconText: "󰋊"
             text: tr.t("tab.disks")
             active: root.activeTab === 2
             onClicked: root.activeTab = 2
           }
           TabButton {
-            width: Math.round(tabRow.availWidth * 0.18)
+            width: Math.round(tabRow.remWidth * 0.24)
             iconText: "󰔏"
             text: tr.t("tab.sensors")
             active: root.activeTab === 3
             onClicked: root.activeTab = 3
           }
           TabButton {
-            width: tabRow.availWidth - Math.round(tabRow.availWidth * 0.19) - Math.round(tabRow.availWidth * 0.22) - Math.round(tabRow.availWidth * 0.15) - Math.round(tabRow.availWidth * 0.18)
+            width: tabRow.remWidth - Math.round(tabRow.remWidth * 0.28) - Math.round(tabRow.remWidth * 0.20) - Math.round(tabRow.remWidth * 0.24)
             iconText: "\uf021"
             text: root.hasActiveTransfers ? (tr.t("tab.transfers") + " (" + root.transferCount + ")") : tr.t("tab.transfers")
             active: root.activeTab === 4
@@ -710,12 +788,34 @@ Panel {
         }
 
         PanelSeparator { foreground: root.fgColor }
+      }
 
-        // ==================== TAB 0: OVERVIEW ====================
+      ScrollView {
+        id: tabScrollView
+        anchors.top: headerColumn.bottom
+        anchors.topMargin: Style.space(12)
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        clip: true
+        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+        ScrollBar.vertical.policy: tabContentColumn.implicitHeight > height ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
+        Binding {
+          target: tabScrollView.contentItem
+          property: "interactive"
+          value: tabContentColumn.implicitHeight > tabScrollView.height
+        }
+
         Column {
-          visible: root.activeTab === 0
-          width: parent.width
+          id: tabContentColumn
+          width: tabScrollView.availableWidth - (tabContentColumn.implicitHeight > tabScrollView.height ? Style.space(4) : 0)
           spacing: Style.space(12)
+
+          // ==================== TAB 0: OVERVIEW ====================
+          Column {
+            visible: root.activeTab === 0
+            width: parent.width
+            spacing: Style.space(12)
 
           // ---- CPU Card ----
           SurfaceCard {
@@ -1038,6 +1138,165 @@ Panel {
               }
             }
           }
+
+          // ---- Transfers Overview Card ----
+          SurfaceCard {
+            width: parent.width
+            clickable: true
+            onClicked: root.activeTab = 4
+
+            Column {
+              width: parent.width
+              spacing: Style.space(8)
+
+              Row {
+                width: parent.width
+                spacing: Style.space(8)
+
+                PlainText {
+                  text: "\uf021  " + tr.t("tab.transfers").toUpperCase()
+                  color: Qt.darker(root.fgColor, 1.35)
+                  font.pixelSize: Style.font.caption
+                  font.bold: true
+                  width: parent.width - (root.hasActiveTransfers ? speedBadge.implicitWidth : idleBadge.implicitWidth) - Style.space(8)
+                  anchors.verticalCenter: parent.verticalCenter
+                }
+
+                // Speed badge when active
+                Rectangle {
+                  id: speedBadge
+                  visible: root.hasActiveTransfers
+                  radius: Style.cornerRadius > 0 ? Math.min(Style.space(4), Style.cornerRadius) : 0
+                  color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.16)
+                  border.width: 1
+                  border.color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.3)
+                  implicitWidth: speedText.implicitWidth + Style.space(12)
+                  implicitHeight: Style.space(20)
+                  anchors.verticalCenter: parent.verticalCenter
+
+                  PlainText {
+                    id: speedText
+                    anchors.centerIn: parent
+                    text: Model.formatSpeed(root.aggTransferSpeed)
+                    color: root.accentColor
+                    font.pixelSize: Style.font.caption
+                    font.bold: true
+                  }
+                }
+
+                // Status when idle
+                PlainText {
+                  id: idleBadge
+                  visible: !root.hasActiveTransfers
+                  text: tr.t("transfers.idle")
+                  color: Qt.darker(root.fgColor, 1.45)
+                  font.pixelSize: Style.font.caption
+                  anchors.verticalCenter: parent.verticalCenter
+                }
+              }
+
+              // Active transfers list in Overview
+              Repeater {
+                model: root.transferList
+
+                Column {
+                  required property var modelData
+                  width: parent.width
+                  spacing: Style.space(4)
+
+                  Row {
+                    width: parent.width
+                    spacing: Style.space(6)
+
+                    PlainText {
+                      text: Model.toolIcon(modelData.tool)
+                      color: root.accentColor
+                      font.pixelSize: Style.font.bodySmall
+                      anchors.verticalCenter: parent.verticalCenter
+                    }
+
+                    PlainText {
+                      text: Model.toolDisplayTitle(modelData.tool)
+                      font.bold: true
+                      font.pixelSize: Style.font.caption
+                      anchors.verticalCenter: parent.verticalCenter
+                    }
+
+                    PlainText {
+                      text: "PID " + modelData.pid
+                      color: Qt.darker(root.fgColor, 1.45)
+                      font.pixelSize: Style.font.caption
+                      anchors.verticalCenter: parent.verticalCenter
+                    }
+
+                    Item { Layout.fillWidth: true; width: 1 }
+
+                    PlainText {
+                      text: Model.formatSpeed(modelData.speed)
+                      color: root.accentColor
+                      font.bold: true
+                      font.pixelSize: Style.font.caption
+                      anchors.verticalCenter: parent.verticalCenter
+                    }
+                  }
+
+                  PlainText {
+                    visible: Boolean(modelData.destination || modelData.source)
+                    text: modelData.destination
+                      ? (Model.shortenPath(modelData.source) + " → " + Model.shortenPath(modelData.destination))
+                      : Model.shortenPath(modelData.source)
+                    color: Qt.darker(root.fgColor, 1.35)
+                    font.pixelSize: Style.font.caption
+                    elide: Text.ElideMiddle
+                    width: parent.width
+                  }
+
+                  ProgressBarTrack {
+                    visible: modelData.progress_pct !== null && modelData.progress_pct !== undefined
+                    width: parent.width
+                    height: Style.space(5)
+                    fraction: Math.max(0, Math.min(1, (modelData.progress_pct || 0) / 100.0))
+                    fillColor: root.accentColor
+                  }
+                }
+              }
+
+              // If idle but has recent completed transfers: show latest completed
+              Row {
+                visible: !root.hasActiveTransfers && root.recentTransferList.length > 0
+                width: parent.width
+                spacing: Style.space(6)
+
+                PlainText {
+                  text: "\uf00c"
+                  color: root.accentColor
+                  font.pixelSize: Style.font.caption
+                }
+
+                PlainText {
+                  text: root.recentTransferList[0]
+                    ? (Model.toolDisplayTitle(root.recentTransferList[0].tool) + " (" + (root.recentTransferList[0].total_bytes ? Model.formatBytes(root.recentTransferList[0].total_bytes) : "") + " em " + (root.recentTransferList[0].elapsed_str || "") + ")")
+                    : ""
+                  color: Qt.darker(root.fgColor, 1.4)
+                  font.pixelSize: Style.font.caption
+                  elide: Text.ElideRight
+                  width: parent.width - Style.space(24)
+                }
+              }
+
+              // Link to Transfers tab
+              Row {
+                anchors.horizontalCenter: parent.horizontalCenter
+                spacing: Style.space(4)
+
+                PlainText {
+                  text: tr.t("tab.transfers") + " →"
+                  color: Qt.darker(root.fgColor, 1.4)
+                  font.pixelSize: Style.font.caption
+                }
+              }
+            }
+          }
         }
 
         // ==================== TAB 1: PROCESSES ====================
@@ -1308,6 +1567,8 @@ Panel {
 
             SurfaceCard {
               required property var modelData
+              clickable: true
+              onClicked: root.openDiskFolder(modelData.mount)
 
               Column {
                 width: parent.width
@@ -1321,7 +1582,7 @@ Panel {
                     text: "󰋊  " + modelData.mount
                     font.pixelSize: Style.font.body
                     font.bold: true
-                    width: parent.width - fsBadge.implicitWidth - pctLabel.implicitWidth - Style.space(16)
+                    width: parent.width - fsBadge.implicitWidth - pctLabel.implicitWidth - openIcon.implicitWidth - Style.space(24)
                   }
 
                   Rectangle {
@@ -1347,6 +1608,14 @@ Panel {
                     color: modelData.pct >= 90 ? root.urgentColor : root.fgColor
                     font.pixelSize: Style.font.body
                     font.bold: true
+                    anchors.verticalCenter: parent.verticalCenter
+                  }
+
+                  PlainText {
+                    id: openIcon
+                    text: "\uf07b"
+                    color: Qt.darker(root.fgColor, 1.45)
+                    font.pixelSize: Style.font.bodySmall
                     anchors.verticalCenter: parent.verticalCenter
                   }
                 }
@@ -1888,6 +2157,7 @@ Panel {
             }
           }
         }
+        }
       }
     }
   }
@@ -1923,13 +2193,31 @@ Panel {
   }
 
   component SurfaceCard: Rectangle {
+    id: cardRoot
     default property alias cardContent: innerItem.data
+    property bool clickable: false
+    signal clicked()
+
     width: parent ? parent.width : 0
     implicitHeight: innerItem.childrenRect.height + Style.space(20)
     radius: Style.cornerRadius
-    color: Qt.rgba(root.fgColor.r, root.fgColor.g, root.fgColor.b, 0.04)
+    color: clickable && cardMouse.containsMouse
+      ? Qt.rgba(root.fgColor.r, root.fgColor.g, root.fgColor.b, 0.08)
+      : Qt.rgba(root.fgColor.r, root.fgColor.g, root.fgColor.b, 0.04)
     border.width: 1
-    border.color: Qt.rgba(root.fgColor.r, root.fgColor.g, root.fgColor.b, 0.12)
+    border.color: clickable && cardMouse.containsMouse
+      ? Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.5)
+      : Qt.rgba(root.fgColor.r, root.fgColor.g, root.fgColor.b, 0.12)
+
+    MouseArea {
+      id: cardMouse
+      anchors.fill: parent
+      enabled: cardRoot.clickable
+      hoverEnabled: cardRoot.clickable
+      cursorShape: cardRoot.clickable ? Qt.PointingHandCursor : Qt.ArrowCursor
+      onClicked: cardRoot.clicked()
+      onWheel: function(wheel) { wheel.accepted = false }
+    }
 
     Item {
       id: innerItem

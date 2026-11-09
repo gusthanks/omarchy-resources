@@ -16,7 +16,7 @@ import subprocess
 STATE_CACHE_FILE = "/dev/shm/omarchy-transfers-state.json"
 TRANSFER_COMMANDS = {
     "rsync", "rclone", "cp", "mv", "dd", "pv", "curl", "wget", "aria2c", "yt-dlp",
-    "git", "restic", "borg", "btrfs", "pacman", "yay", "paru", "tar", "zstd", "ffmpeg"
+    "git", "idevicebackup2", "restic", "borg", "btrfs", "pacman", "yay", "paru", "tar", "zstd", "ffmpeg"
 }
 
 CURRENT_UID = os.getuid()
@@ -328,6 +328,12 @@ def parse_command_details(args, cwd):
             i += 1
         return f"git {sub}", (pos_args[0] if pos_args else ""), (pos_args[1] if len(pos_args) > 1 else cwd)
 
+    elif comm == "idevicebackup2":
+        pos_args = [a for a in args[1:] if not a.startswith("-")]
+        sub = pos_args[0] if pos_args else "backup"
+        dst = pos_args[-1] if len(pos_args) > 1 else cwd
+        return f"iPhone {sub}", "", dst
+
     elif comm in ("pacman", "yay", "paru"):
         pkg_targets = [a for a in args[1:] if not a.startswith("-")]
         pkg_desc = ", ".join(pkg_targets[:3]) if pkg_targets else "Packages"
@@ -555,6 +561,16 @@ def collect_all_transfers():
                 norm_mnt = source_fs.get("mount", "").rstrip("/")
                 if norm_src == norm_mnt:
                     overall_total_bytes = source_fs.get("used_bytes", 0)
+
+            if tool_name.startswith("iPhone backup") and overall_total_bytes == 0:
+                # Expected size = space used on the device (cached by collect-details.sh)
+                try:
+                    with open(f"/run/user/{CURRENT_UID}/gusthx-resources-ios.tsv") as fh:
+                        used = [int(l.split("\t")[5]) for l in fh if l.startswith("DISK\t")]
+                    if used:
+                        overall_total_bytes = used[0]
+                except Exception:
+                    pass
 
             elapsed_sec = 0
             try:

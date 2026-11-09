@@ -138,6 +138,34 @@ df -B1 -T -P -x tmpfs -x devtmpfs -x efivarfs -x squashfs -x overlay 2>/dev/null
   }
 '
 
+# 6b. Connected iPhones/iPads (libimobiledevice; cached ~30s to avoid hitting lockdownd every tick)
+if command -v idevice_id >/dev/null 2>&1 && command -v ideviceinfo >/dev/null 2>&1; then
+  ios_cache="${XDG_RUNTIME_DIR:-/tmp}/gusthx-resources-ios.tsv"
+  ios_now=$(date +%s)
+  ios_mtime=$(stat -c %Y "$ios_cache" 2>/dev/null || echo 0)
+  if (( ios_now - ios_mtime >= 30 )); then
+    {
+      for udid in $(timeout 2 idevice_id -l 2>/dev/null | sort -u); do
+        info=$(timeout 3 ideviceinfo -u "$udid" -q com.apple.disk_usage 2>/dev/null) || continue
+        name=$(timeout 3 ideviceinfo -u "$udid" -k DeviceName 2>/dev/null | tr -d '\t\r\n')
+        model=$(timeout 3 ideviceinfo -u "$udid" -k ProductType 2>/dev/null | tr -d '\t\r\n')
+        kind=iPhone; [[ $model == iPad* ]] && kind=iPad
+        awk -v name="${name:-$kind}" -v model="${model:-iOS}" -v kind="$kind" '
+          /^TotalDataCapacity:/   { total = $2 }
+          /^AmountDataAvailable:/ { avail = $2 }
+          END {
+            if (total > 0) {
+              used = total - avail
+              printf "DISK\t%s\tafc\t%s\t%.0f\t%.0f\t%.0f\t%d\n",
+                kind " · " name, model, total, used, avail, (used * 100 / total) + 0.5
+            }
+          }' <<<"$info"
+      done
+    } > "$ios_cache.tmp" 2>/dev/null && mv -f "$ios_cache.tmp" "$ios_cache"
+  fi
+  cat "$ios_cache" 2>/dev/null
+fi
+
 # 7. Top Processes by CPU (top 10) and by Memory (top 10)
 ps -eo pid=,pcpu=,pmem=,rss=,state=,comm= --sort=-pcpu 2>/dev/null | awk '
   NR <= 10 {
