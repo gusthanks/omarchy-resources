@@ -2,9 +2,9 @@
   "schemaVersion": 1,
   "id": "gusthx.resources",
   "name": "Resource Monitor",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "gusthx",
-  "description": "Complete system resource monitor with live CPU, RAM, Swap, Network, Disk I/O, Thermal Sensors, Process Manager, and Background File Transfers",
+  "description": "System resource monitor for the bar: live CPU, memory, network, disk I/O, sensors, processes, disks (iPhone/iPad included) and background file transfers.",
   "kinds": [
     "bar-widget"
   ],

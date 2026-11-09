@@ -1,0 +1,54 @@
+{
+  "count": 2,
+  "agg_read_speed": 96468992,
+  "agg_write_speed": 103809024,
+  "agg_speed": 103809024,
+  "transfers": [
+    {
+      "pid": 51234,
+      "tree_pids": [51234, 51236, 51237],
+      "tool": "rsync",
+      "category": "sync",
+      "state": "disk_wait",
+      "command": "rsync -a --info=progress2 /home/user/Photos/ /run/media/user/Backup/Photos/",
+      "source": "/home/user/Photos/",
+      "destination": "/run/media/user/Backup/Photos/",
+      "total_bytes": 41875931136,
+      "active_speed": 89128960,
+      "elapsed_sec": 512,
+      "elapsed_str": "8m 32s",
+      "active_file": { "name": "IMG_4821.HEIC", "size": 4194304, "pos": 2936013, "pct": 70.0 },
+      "file_eta": "1s",
+      "dest_fs": { "name": "Backup", "free_bytes": 388137566208 },
+      "overall_total_bytes": 68719476736,
+      "overall_pct": 60.9,
+      "overall_eta": "5m 06s",
+      "overall_is_estimate": false
+    },
+    {
+      "pid": 51870,
+      "tree_pids": [51870],
+      "tool": "idevicebackup2 backup",
+      "category": "sync",
+      "state": "running",
+      "command": "idevicebackup2 -u 00008110-000000000000001E backup /run/media/user/Backup/iPhone",
+      "source": "",
+      "destination": "/run/media/user/Backup/iPhone",
+      "total_bytes": 23622320128,
+      "active_speed": 14680064,
+      "elapsed_sec": 1340,
+      "elapsed_str": "22m 20s",
+      "active_file": null,
+      "file_eta": "",
+      "dest_fs": { "name": "Backup", "free_bytes": 388137566208 },
+      "overall_total_bytes": 89600000000,
+      "overall_pct": 26.4,
+      "overall_eta": "1h 15m",
+      "overall_is_estimate": true
+    }
+  ],
+  "recent_completed": [
+    { "tool": "cp", "source": "/home/user/Downloads/arch.iso", "destination": "/run/media/user/Backup/", "total_bytes": 1288490188, "elapsed_str": "14s" },
+    { "tool": "git clone", "source": "https://github.com/example/project.git", "destination": "/home/user/src", "total_bytes": 0, "elapsed_str": "21s" }
+  ]
+}

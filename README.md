@@ -1,96 +1,161 @@
-# 📊 omarchy-resources
+# Resource Monitor for Omarchy
 
-> **Resource Monitor & Background Transfers** — Complete system telemetry and live file transfer monitor for the [Omarchy](https://omarchy.org) status bar.
+A system monitor for the [Omarchy](https://omarchy.org) bar: live CPU, memory, network
+and disk I/O, a process list you can act on, disks (connected iPhones and iPads included),
+temperature sensors, and the file transfers running in the background (`rsync`, `cp`,
+downloads, iPhone/iPad backups and more) with speed, progress and ETA.
 
-[![Omarchy Plugin](https://img.shields.io/badge/omarchy-plugin-blue?style=flat-square)](https://omarchy.org)
-[![Version](https://img.shields.io/badge/version-1.0.0-emerald?style=flat-square)](manifest.json)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Hyprland-purple?style=flat-square)](https://wiki.hypr.land)
+<p align="center"><img src="docs/overview.png" width="520" alt="The Overview tab: CPU with per-core bars, memory, network, disk I/O and the active transfers"></p>
 
-`omarchy-resources` is a high-performance, modular system monitor widget for Omarchy Linux (Hyprland / Quickshell). It brings together real-time hardware telemetry, live interactive process management, storage stats, hardware sensors, and background file transfer tracking under a unified, elegant popup interface.
+## What you get
 
----
+- **Bar label** with CPU and RAM, in four modes: compact, detailed (adds temperature and
+  memory used), full (adds network speed) or icon only. Right-click the label to cycle them.
+- **Overview**: CPU (history graph, per-core load and frequency), memory and swap,
+  network and disk I/O graphs, and a Transfers card. Click the card to open the Transfers tab.
+- **Processes**: the top 10 by CPU or by memory. Terminate one (SIGTERM) with a click or
+  <kbd>x</kbd>, or open `btop`.
+- **Disks**: every mounted filesystem with free space. Click a disk to open it in your
+  file manager (`xdg-open`). Connected **iPhones and iPads** are listed with their storage
+  when `libimobiledevice` is installed (they have no folder to open).
+- **Sensors**: temperatures, fans, battery power, CPU model, kernel, GPU clock, load,
+  context switches and uptime.
+- **Transfers**: `rsync`, `rclone`, `cp`, `mv`, `dd`, `pv`, `curl`, `wget`, `aria2c`,
+  `yt-dlp`, `git`, `idevicebackup2`, `restic`, `borg`, `btrfs`, `pacman`/`yay`/`paru`,
+  `tar`, `zstd` and `ffmpeg` started by you. Each shows speed, the file being copied,
+  overall progress and ETA when the total size is known, and can be paused, resumed,
+  cancelled, opened or copied as a command. A notification tells you when a long transfer
+  finishes.
+- **iPhone/iPad backups** (`idevicebackup2 backup`): the backup size is not known up front,
+  so progress and ETA are estimated from the space used on the device and marked with
+  **≈** and *(estimate)*.
+- Follows the Omarchy theme live, and speaks English and Portuguese (Brazil and Portugal).
 
-## ✨ Features
+<p align="center">
+  <img src="docs/transfers.png" width="270" alt="Transfers: an rsync with overall and per-file progress, and an iPhone backup with estimated progress">
+  <img src="docs/processes.png" width="270" alt="Processes sorted by CPU">
+  <img src="docs/disks.png" width="270" alt="Disks, including a connected iPhone">
+</p>
+<p align="center">
+  <img src="docs/sensors.png" width="270" alt="Sensors and hardware">
+  <img src="docs/transfers-pt-BR.png" width="270" alt="The Transfers tab in Brazilian Portuguese">
+</p>
 
-- **📊 Tab 1 — System Overview:**
-  - Real-time CPU usage (User, System, IO-wait) with 60-sample historical sparkline graphs.
-  - Memory consumption (RAM Used, Available, Cached/Buffers, Swap/ZRAM).
-  - Live Network traffic (Download / Upload speed and rolling bandwidth history).
-  - Real-time Disk I/O read/write transfer rates.
-- **⚡ Tab 2 — Interactive Process Manager:**
-  - Top active processes sorted by CPU or Memory usage.
-  - Sort switcher (`s` key).
-  - Interactive process termination (`SIGTERM`) via `x` or `Delete`.
-  - Direct integration shortcut to open `btop` in terminal (`b` key).
-- **💾 Tab 3 — Disks & Storage:**
-  - Automatic detection of physical storage drives and mount points.
-  - Free space progress tracks and visual indicators.
-- **🌡️ Tab 4 — Thermal Sensors & Hardware:**
-  - Hardware thermal zone monitoring (CPU Package, Core temps, Fan RPM, Battery power/voltage).
-  - System specs: CPU model, Kernel version, GPU clock frequency, Context switch rate, and Uptime.
-- **🚀 Tab 5 — Background File Transfers (Integrated):**
-  - Live detection of CLI and background file operations (`rsync`, `rclone`, `dd`, `git clone`, `curl`, `wget`, `cp`, `tar`).
-  - Deep `/proc/<pid>/fd` inspection: displays the exact file currently being transferred, progress percentage, ETA, and overall sync progress.
-  - Interactive process controls: Pause (`p`), Resume, Cancel (`x`), Open destination folder in Nautilus (`o`), and Copy command (`c`).
-  - Ignores persistent daemons and cloud mounts (e.g. `rclone mount`) to avoid false positives.
-- **🎨 100% Native Omarchy Design:**
-  - Fully dynamic colors following the active Omarchy theme live.
-  - Multiple status bar display modes: `compact`, `detailed`, `full`, or `icon` (cycled with Right Click or `m`).
-  - Responsive keyboard shortcuts (`1` to `5` to switch tabs, `Esc` to close).
+*(Screenshots are rendered from mock data by the dev harness, see [Development](#development).)*
 
----
-
-## 📦 Installation
-
-Install directly with the Omarchy CLI:
-
-```bash
-omarchy plugin add https://github.com/gusthanks/omarchy-resources --enable
-```
-
-Then reload the shell:
+## Install
 
 ```bash
+omarchy plugin add https://github.com/gusthanks/omarchy-resources.git --enable
 omarchy restart shell
 ```
 
----
+Update with `omarchy plugin update gusthx.resources --yes`, then `omarchy restart shell`.
 
-## 🛠️ Keyboard Shortcuts
+### Requirements
 
-When the panel is open:
+Required: `python3` (transfers) and `procps` (`ps`), both on every Omarchy install.
+Optional, each one adds a feature:
 
-| Key | Action |
+| Package | Adds |
+|---|---|
+| `libimobiledevice` | iPhone/iPad storage on the Disks tab, size estimate for `idevicebackup2` backups |
+| `btop` | the *btop* button and <kbd>b</kbd> |
+| `lm_sensors` / hwmon drivers | more entries on the Sensors tab |
+| `xdg-utils` and a file manager | opening disks and transfer folders |
+| `wl-clipboard` | *Copy command* |
+| `libnotify` (`notify-send`) | the "transfer finished" notification |
+
+## Use
+
+| On the bar label | Does |
+|---|---|
+| Left click | Open or close the popup |
+| Middle click | Open `btop` |
+| Right click | Next bar mode (compact, detailed, full, icon) |
+
+In the popup:
+
+| Key | Does |
 |:---:|:---|
-| `1` | Switch to **Overview** |
-| `2` | Switch to **Processes** |
-| `3` | Switch to **Disks** |
-| `4` | Switch to **Sensors & Hardware** |
-| `5` | Switch to **Transfers** |
-| `↑` / `↓` | Select process (Tab 2) or transfer (Tab 5) |
-| `s` | Toggle Process sorting (CPU / Memory) |
-| `x` | Terminate selected process (SIGTERM) or cancel transfer |
-| `p` | Pause / Resume selected transfer |
-| `o` | Open transfer destination in file manager |
-| `c` | Copy transfer command to clipboard |
-| `b` | Launch `btop` system monitor |
-| `m` | Cycle status bar mode (`compact` / `detailed` / `full` / `icon`) |
-| `r` | Force refresh telemetry |
-| `Esc` | Close panel |
+| <kbd>1</kbd>–<kbd>5</kbd>, <kbd>←</kbd>/<kbd>→</kbd> | Switch tab (Overview, Processes, Disks, Sensors, Transfers) |
+| <kbd>↑</kbd>/<kbd>↓</kbd> | Select a process or transfer; scroll on the other tabs |
+| <kbd>PgUp</kbd>/<kbd>PgDn</kbd>, <kbd>Home</kbd>/<kbd>End</kbd> | Scroll the tab |
+| <kbd>s</kbd> | Sort processes by CPU or memory |
+| <kbd>x</kbd> / <kbd>Delete</kbd> | Terminate the selected process, or cancel the selected transfer |
+| <kbd>p</kbd> | Pause or resume the selected transfer |
+| <kbd>o</kbd> | Open the selected transfer's destination |
+| <kbd>c</kbd> | Copy the selected transfer's command |
+| <kbd>b</kbd> | Open `btop` |
+| <kbd>m</kbd> | Next bar mode |
+| <kbd>r</kbd> | Refresh now |
+| <kbd>Esc</kbd> | Close |
 
----
-
-## 🧪 Testing
-
-The data parsers and telemetry formatters are covered by automated unit tests using Vitest:
+From a keybinding or script:
 
 ```bash
-npm test
+omarchy-shell gusthx.resources toggle   # also: open, close, cycleMode
 ```
 
----
+The bar mode is saved on the widget's entry in `~/.config/omarchy/shell.json`
+(`"barMode": "compact" | "detailed" | "full" | "icon"`).
 
-## 📄 License
+## Privacy
 
-MIT © [gusthx](https://github.com/gusthanks)
+Nothing leaves your machine: no network requests, no telemetry, no logs.
+
+What it **reads**: `/proc` (CPU, memory, network and disk counters; for your own processes
+also their command lines, open files under `/proc/<pid>/fd` and I/O counters, to detect
+transfers and the file being copied), `/sys` (temperatures, frequencies, fans, battery),
+`df` and `ps` output, and, when `libimobiledevice` is installed, the name, model and storage
+of connected iPhones/iPads (`idevice_id`, `ideviceinfo`).
+
+What it **writes**, only in your per-user runtime directory (`$XDG_RUNTIME_DIR`, normally
+`/run/user/<uid>`, readable only by you, cleared at logout):
+
+- `gusthx-resources-transfers.json`: the transfers seen in the last run (commands, paths,
+  byte counters) and the last few finished ones, to compute speeds.
+- `gusthx-resources-ios.tsv`: connected iPhones/iPads (name, model, storage, UDID), cached
+  for 30 seconds.
+
+What it **does** only when you ask: sends SIGTERM to a process, SIGSTOP/SIGCONT/SIGTERM to
+a transfer, opens folders with `xdg-open`, copies a command to the clipboard (`wl-copy`),
+opens `btop`. When a long transfer finishes it shows a desktop notification.
+
+## Development
+
+Work in a clone of this repository, never in the installed copy under
+`~/.config/omarchy/plugins/` (saving there hot-reloads your bar). `dev/run.sh` starts a
+**separate** Quickshell instance with Omarchy's `Commons`/`Ui` libraries, this repo and
+mock data from `dev/mock/`: it never reads your system, runs the collectors or touches the
+running shell. Captures render offscreen, so nothing shows on screen.
+
+```bash
+dev/run.sh check     # compile every QML type, Panel.qml included
+dev/run.sh test      # Model.js, i18n and collector tests (node --test + python3 unittest, no packages)
+dev/run.sh docs      # docs/overview.png, processes.png, disks.png, sensors.png, transfers.png, preview.png
+dev/run.sh preview   # the popup in a window, with mock data
+LANGUAGE=pt-BR dev/run.sh transfers   # docs/transfers-pt-BR.png
+omarchy plugin validate .   # from a clean checkout (a local node_modules/ makes it fail)
+```
+
+Layout: `Panel.qml` (bar label, popup window, IPC), `Monitor.qml` (sampling, collectors and
+actions), `ResourcesView.qml` (the popup's content, fed by `Monitor.qml` or by the harness),
+`Model.js` (pure parsing and formatting), `collect-details.sh` (CPU, sensors, disks,
+iPhones/iPads, top processes), `collect-transfers.py` (transfer detection and actions),
+`i18n/*.json` (strings, read through `Commons.Translations`), `dev/` (harness, mocks,
+tests, deploy).
+
+When everything is committed and tested, install it into your own bar once:
+
+```bash
+dev/deploy.sh   # validates, compiles, installs HEAD into the live plugin, restarts the shell once
+```
+
+If the live folder is a plain copy rather than a git checkout, `deploy.sh` first moves it to
+`~/Work/backups/gusthx.resources.<timestamp>` and replaces it with a checkout of this repo.
+[AGENTS.md](AGENTS.md) and `CLAUDE.md` hold the rules AI agents (and humans) follow here.
+
+## License
+
+[MIT](LICENSE) © gusthx
