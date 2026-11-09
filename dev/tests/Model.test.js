@@ -35,7 +35,7 @@ const {
   MAX_HISTORY, neutralizeMarkup, clamp, pushHistory, parseProcStat, parseProcMeminfo,
   parseProcLoadavg, parseProcUptime, parseProcNetDev, parseProcDiskstats, parseDetailsOutput,
   formatBytes, formatShortBytes, formatRate, formatShortRate, formatSpeed, formatDuration,
-  toolIcon, toolDisplayTitle, formatRecentTransfer, diskOpenPath, shortenPath, tildePath, transferPath, parseJsonSafely
+  toolIcon, toolDisplayTitle, formatRecentTransfer, diskOpenPath, shortenPath, tildePath, transferPath, directionArrow, parseJsonSafely
 } = mod.exports
 
 describe('gusthx.resources Model.js', () => {
@@ -489,6 +489,12 @@ MemFree:        4096000 kB`
       expect(tildePath('/home/meow/x', '/home/me')).toBe('/home/meow/x')
       expect(tildePath('/mnt/x', '')).toBe('/mnt/x')
       expect(tildePath('gdrive:b/', '/home/me')).toBe('gdrive:b/')
+    })
+    it('marks uploads and downloads', () => {
+      expect(directionArrow('upload')).toBe('↑ ')
+      expect(directionArrow('download')).toBe('↓ ')
+      expect(directionArrow('')).toBe('')
+      expect(directionArrow(undefined)).toBe('')
     })
     it('shortens after replacing the home folder', () => {
       expect(transferPath('/home/me/a.tar', '/home/me', 10)).toBe('~/a.tar')

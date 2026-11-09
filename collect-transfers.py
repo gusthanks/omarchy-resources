@@ -15,7 +15,7 @@ import subprocess
 
 TRANSFER_COMMANDS = {
     "rsync", "rclone", "cp", "mv", "dd", "pv", "curl", "wget", "aria2c", "yt-dlp",
-    "git", "idevicebackup2", "restic", "borg", "btrfs", "pacman", "yay", "paru", "tar", "zstd", "ffmpeg"
+    "git", "scp", "sftp", "idevicebackup2", "restic", "borg", "btrfs", "pacman", "yay", "paru", "tar", "zstd", "ffmpeg"
 }
 
 # Tools whose folder sources are sized with du to get an overall total.
@@ -239,6 +239,62 @@ def get_active_file_info(pids, source_hint="", dest_hint=""):
     best["name"] = display_name
     return best
 
+# The rclone commands that move or read file contents.
+RCLONE_TRANSFER_COMMANDS = {"copy", "copyto", "sync", "move", "moveto", "bisync", "copyurl",
+                            "check", "cryptcheck", "rcat", "cat"}
+
+
+def rclone_subcommand(args):
+    """The command of an rclone command line: its first word that is not an option."""
+    for a in args[1:]:
+        if a and not a.startswith("-"):
+            return a
+    return ""
+
+
+SCP_OPTS_WITH_ARG = {"-P", "-i", "-o", "-F", "-c", "-l", "-J", "-S", "-D", "-X"}
+
+
+def transfer_direction(tool, src, dst):
+    """"upload" when the destination is on another machine or service, "download"
+    when the source is, "" for a transfer inside this computer."""
+    dst_remote = bool(dst) and not is_local_path(dst, tool)
+    src_remote = bool(src) and not is_local_path(src, tool)
+    if dst_remote and not src_remote:
+        return "upload"
+    if src_remote:
+        return "download"
+    return ""
+
+
+def get_tree_char_io(pids):
+    """Bytes read and written through any file descriptor (rchar/wchar), sockets
+    and cached files included. See network_progress() for what each one means."""
+    rc = wc = 0
+    for p in pids:
+        try:
+            with open(f"/proc/{p}/io", "r") as f:
+                for line in f:
+                    if line.startswith("rchar:"):
+                        rc += int(line.split()[1])
+                    elif line.startswith("wchar:"):
+                        wc += int(line.split()[1])
+        except (OSError, ValueError):
+            pass
+    return rc, wc
+
+
+def network_progress(direction, rb, wb, rchar, wchar):
+    """(bytes done, network byte counter) of a transfer to or from another machine.
+    An upload reads the source (rchar) and writes to a socket (wchar); a download
+    reads a socket and writes the file. The local side says how far the transfer
+    is; the socket side says how fast data is really leaving or arriving (tools
+    such as rclone read ahead in big chunks, and may send a chunk again)."""
+    if direction == "upload":
+        return max(rb, rchar), wchar
+    return max(wb, wchar), rchar
+
+
 def is_local_path(path, tool=""):
     """False for URLs and for remotes (rsync `host:dir`, rclone `remote:dir`)."""
     if not path or "://" in path:
@@ -246,7 +302,7 @@ def is_local_path(path, tool=""):
     if path.startswith(("/", "./", "../", "~")):
         return True
     base = tool.split()[0] if tool else ""
-    if base in ("rsync", "rclone", "git") and ":" in path.split("/", 1)[0]:
+    if base in ("rsync", "rclone", "git", "scp", "sftp") and ":" in path.split("/", 1)[0]:
         return False
     return True
 
@@ -484,10 +540,36 @@ def _parse_tool_source_destination(args, cwd):
                 dst = a[3:]
         return "dd", src, dst
 
+    elif comm in ("scp", "sftp"):
+        pos_args = []
+        i = 1
+        while i < len(args):
+            if args[i] in SCP_OPTS_WITH_ARG:
+                i += 2
+                continue
+            if not args[i].startswith("-"):
+                pos_args.append(args[i])
+            i += 1
+        if comm == "sftp":
+            return comm, (pos_args[0] if pos_args else ""), cwd
+        return comm, (pos_args[0] if pos_args else ""), (pos_args[-1] if len(pos_args) > 1 else "")
+
     elif comm == "rclone":
         sub = "copy"
         pos_args = []
+        opts_with_arg = {"--transfers", "--checkers", "--drive-chunk-size", "--stats", "--bwlimit",
+                         "--config", "--include", "--exclude", "--filter", "--include-from",
+                         "--exclude-from", "--files-from", "--log-file", "--log-level",
+                         "--max-size", "--min-size", "--max-age", "--min-age", "--tpslimit",
+                         "--backup-dir", "--retries", "--buffer-size", "--max-transfer"}
+        skip = False
         for a in args[1:]:
+            if skip:
+                skip = False
+                continue
+            if a in opts_with_arg:
+                skip = True
+                continue
             if not a.startswith("-") and not pos_args:
                 sub = a
                 pos_args.append(a)
@@ -897,8 +979,8 @@ def collect_all_transfers():
                     cmd_raw = cf.read().decode("utf-8", "replace")
                     if "checkup-db" in cmd_raw or "checkupdates" in cmd_raw or " -Q" in cmd_raw:
                         continue
-                    if comm == "rclone" and any(sub in cmd_raw for sub in ("mount", "config", "version", "rc", "serve")):
-                        continue
+                    if comm == "rclone" and rclone_subcommand(cmd_raw.split("\x00")) not in RCLONE_TRANSFER_COMMANDS:
+                        continue  # mount, config, serve, ls...: not a transfer
 
                 with open(f"/proc/{pid}/stat", "r") as f:
                     parts = f.read().split()
@@ -916,6 +998,7 @@ def collect_all_transfers():
     transfers = []
     live_size_keys = set()
     total_agg_read_speed = 0.0
+    total_agg_speed = 0.0
     total_agg_write_speed = 0.0
     active_pid_set = set(str(p) for p in root_pids)
 
@@ -985,13 +1068,28 @@ def collect_all_transfers():
                 read_speed = 0.7 * read_speed + 0.3 * prev_rs
                 write_speed = 0.7 * write_speed + 0.3 * prev_ws
 
+            # To or from another machine the disk counters miss one side (and
+            # cached files entirely): count what went through the process.
+            direction = transfer_direction(tool_name, src_path, dst_path)
+            moved = max(rb, wb)
+            net_bytes = 0
+            through_speed = 0.0
+            if direction:
+                rchar, wchar = get_tree_char_io(tree_pids)
+                moved, net_bytes = network_progress(direction, rb, wb, rchar, wchar)
+                if prev and "net_bytes" in prev:
+                    through_speed = max(0.0, (net_bytes - prev["net_bytes"]) / dt)
+                    through_speed = 0.7 * through_speed + 0.3 * prev.get("through_speed", 0.0)
+
             if state == "paused":
                 read_speed = 0.0
                 write_speed = 0.0
                 active_speed = 0.0
             else:
-                active_speed = max(read_speed, write_speed)
+                # Nothing on the wire (e.g. `rclone check` hashing local files): disk speed.
+                active_speed = through_speed if through_speed > 1024 else max(read_speed, write_speed)
 
+            total_agg_speed += active_speed
             total_agg_read_speed += read_speed
             total_agg_write_speed += write_speed
 
@@ -1074,7 +1172,7 @@ def collect_all_transfers():
                 pass
 
             if overall_total_bytes > 0:
-                transferred_bytes = max(rb, wb)
+                transferred_bytes = moved
                 overall_pct = max(0.0, min(100.0, round((transferred_bytes / overall_total_bytes * 100), 1)))
                 rem_overall = max(0, overall_total_bytes - transferred_bytes)
                 if rem_overall > 0:
@@ -1096,13 +1194,13 @@ def collect_all_transfers():
                 category = "git"
             elif tool_name in ("pacman", "yay", "paru"):
                 category = "system"
-            elif "rclone" in tool_name:
+            elif "rclone" in tool_name or tool_name in ("scp", "sftp"):
                 category = "cloud"
 
             if tool_name in ("curl", "wget"):
                 has_dest_file = bool(dst_path and dst_path != cwd)
                 # If it's a brief API query to stdout with no file, ignore it
-                if not has_dest_file and max(rb, wb) < 256 * 1024 and elapsed_sec < 4 and active_speed < 1024:
+                if not has_dest_file and moved < 256 * 1024 and elapsed_sec < 4 and active_speed < 1024:
                     continue
 
             item_data = {
@@ -1117,7 +1215,8 @@ def collect_all_transfers():
                 "cwd": cwd,
                 "read_bytes": rb,
                 "write_bytes": wb,
-                "total_bytes": max(rb, wb),
+                "total_bytes": moved,
+                "direction": direction,
                 "read_speed": round(read_speed),
                 "write_speed": round(write_speed),
                 "active_speed": round(active_speed),
@@ -1144,7 +1243,9 @@ def collect_all_transfers():
                 "wb": wb,
                 "read_speed": read_speed,
                 "write_speed": write_speed,
-                "total_bytes": max(rb, wb),
+                "through_speed": through_speed,
+                "net_bytes": net_bytes,
+                "total_bytes": moved,
                 "elapsed_sec": elapsed_sec,
                 "elapsed_str": format_eta(elapsed_sec),
                 "tool": tool_name,
@@ -1173,7 +1274,7 @@ def collect_all_transfers():
         "count": len(transfers),
         "agg_read_speed": round(total_agg_read_speed),
         "agg_write_speed": round(total_agg_write_speed),
-        "agg_speed": round(max(total_agg_read_speed, total_agg_write_speed)),
+        "agg_speed": round(total_agg_speed),
         "transfers": transfers,
         "recent_completed": recent_completed[:5]
     }

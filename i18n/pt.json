@@ -71,7 +71,7 @@
   "transfers.copied": "Copiado!",
   "transfers.destFree": "%1: %2 livres",
   "transfers.elapsed": "Decorrido: %1",
-  "transfers.emptyHint": "Acompanha automaticamente rsync, rclone, cp, dd, transferências, cópias de segurança de iPhone/iPad e cópias locais.",
+  "transfers.emptyHint": "Acompanha automaticamente rsync, rclone, scp, cp, dd, transferências, envios para a nuvem, cópias de segurança de iPhone/iPad e cópias locais.",
   "transfers.eta": "Restante %1",
   "transfers.etaEstimate": "Restante ≈ %1 (estimativa)",
   "transfers.overall": "Progresso geral",

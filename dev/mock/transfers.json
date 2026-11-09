@@ -1,8 +1,8 @@
 {
-  "count": 2,
+  "count": 3,
   "agg_read_speed": 96468992,
   "agg_write_speed": 103809024,
-  "agg_speed": 103809024,
+  "agg_speed": 110100480,
   "transfers": [
     {
       "pid": 51234,
@@ -49,7 +49,8 @@
         "state": "running"
       },
       "overall_scanning": false,
-      "overall_estimate_kind": "source"
+      "overall_estimate_kind": "source",
+      "direction": ""
     },
     {
       "pid": 51870,
@@ -88,7 +89,51 @@
         "state": "running"
       },
       "overall_scanning": false,
-      "overall_estimate_kind": "device"
+      "overall_estimate_kind": "device",
+      "direction": ""
+    },
+    {
+      "pid": 51902,
+      "tree_pids": [
+        51902
+      ],
+      "tool": "rclone copy",
+      "category": "cloud",
+      "state": "running",
+      "direction": "upload",
+      "command": "rclone copy --transfers 4 /home/user/Videos/trip gdrive:raw/trip",
+      "source": "/home/user/Videos/trip",
+      "destination": "gdrive:raw/trip",
+      "total_bytes": 3645000000,
+      "active_speed": 6291456,
+      "elapsed_sec": 612,
+      "elapsed_str": "10m 12s",
+      "active_file": {
+        "name": "DJI_0842.MP4",
+        "size": 1288490188,
+        "pos": 407091068,
+        "pct": 31.6,
+        "writing": false
+      },
+      "file_eta": "2m 20s",
+      "dest_fs": null,
+      "overall_total_bytes": 11652000000,
+      "overall_pct": 31.3,
+      "overall_eta": "21m 10s",
+      "overall_is_estimate": true,
+      "overall_estimate_kind": "source",
+      "overall_scanning": false,
+      "batch": {
+        "pid": 51200,
+        "name": "backup-all.sh",
+        "path": "/home/user/bin/backup-all.sh",
+        "command": "bash /home/user/bin/backup-all.sh",
+        "cwd": "/home/user",
+        "total_bytes": 79456894976,
+        "elapsed_sec": 1392,
+        "elapsed_str": "23m 12s",
+        "state": "running"
+      }
     }
   ],
   "recent_completed": [
@@ -108,9 +153,9 @@
     }
   ],
   "home": "/home/user",
-  "agg_total_bytes": 65498251264,
-  "agg_overall_total_bytes": 158319476736,
-  "agg_overall_pct": 41.4,
+  "agg_total_bytes": 69143251264,
+  "agg_overall_total_bytes": 169971476736,
+  "agg_overall_pct": 40.7,
   "agg_overall_is_estimate": true,
   "batches": [
     {
@@ -122,8 +167,8 @@
       "total_bytes": 79456894976,
       "elapsed_sec": 1392,
       "elapsed_str": "23m 12s",
-      "transfers": 2,
-      "active_speed": 103809024,
+      "transfers": 3,
+      "active_speed": 110100480,
       "state": "running"
     }
   ]

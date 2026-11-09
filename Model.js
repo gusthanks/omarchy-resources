@@ -550,6 +550,11 @@ function tildePath(p, home) {
   return s.indexOf(h + "/") === 0 ? "~" + s.substring(h.length) : s
 }
 
+// "↑ " for a transfer leaving this computer, "↓ " for one arriving, "" for local.
+function directionArrow(direction) {
+  return direction === "upload" ? "↑ " : direction === "download" ? "↓ " : ""
+}
+
 // The path of a transfer as the panel shows it: whole when it fits in maxLen.
 function transferPath(p, home, maxLen) {
   return shortenPath(tildePath(p, home), maxLen || 38)
@@ -573,7 +578,7 @@ if (typeof module !== "undefined" && module.exports) {
     parseDetailsOutput: parseDetailsOutput, formatBytes: formatBytes, formatShortBytes: formatShortBytes,
     formatRate: formatRate, formatShortRate: formatShortRate, formatSpeed: formatSpeed,
     formatDuration: formatDuration, translate: translate, toolIcon: toolIcon, toolDisplayTitle: toolDisplayTitle,
-    formatRecentTransfer: formatRecentTransfer, diskOpenPath: diskOpenPath, shortenPath: shortenPath, tildePath: tildePath, transferPath: transferPath,
+    formatRecentTransfer: formatRecentTransfer, diskOpenPath: diskOpenPath, shortenPath: shortenPath, tildePath: tildePath, transferPath: transferPath, directionArrow: directionArrow,
     parseJsonSafely: parseJsonSafely
   }
 }

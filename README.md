@@ -20,12 +20,14 @@ downloads, iPhone/iPad backups and more) with speed, progress and ETA.
   when `libimobiledevice` is installed (they have no folder to open).
 - **Sensors**: temperatures, fans, battery power, CPU model, kernel, GPU clock, load,
   context switches and uptime.
-- **Transfers**: `rsync`, `rclone`, `cp`, `mv`, `dd`, `pv`, `curl`, `wget`, `aria2c`,
-  `yt-dlp`, `git`, `idevicebackup2`, `restic`, `borg`, `btrfs`, `pacman`/`yay`/`paru`,
+- **Transfers**: `rsync`, `rclone`, `scp`, `sftp`, `cp`, `mv`, `dd`, `pv`, `curl`, `wget`,
+  `aria2c`, `yt-dlp`, `git`, `idevicebackup2`, `restic`, `borg`, `btrfs`, `pacman`/`yay`/`paru`,
   `tar`, `zstd` and `ffmpeg` started by you. Each shows speed, the file being copied,
   overall progress and ETA when the total size is known, and can be paused, resumed,
   cancelled, opened or copied as a command. A notification tells you when a long transfer
-  finishes. Paths are shown in full (relative ones resolved against the command's working
+  finishes. Transfers to or from another machine or a cloud remote (`rclone copy dir gdrive:x`,
+  `rsync dir host:x`, `scp`) are included, marked ↑ or ↓, with the speed measured on the
+  network side. Paths are shown in full (relative ones resolved against the command's working
   directory), a folder's total size is worked out in the background with `du`, and a card
   at the top adds everything up. A transfer started by a script (`bash backup.sh`, a
   Python script, `make`) is shown as a step of that **batch**, with the script's path, how

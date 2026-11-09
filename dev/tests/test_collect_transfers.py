@@ -132,6 +132,45 @@ class Paths(unittest.TestCase):
         self.assertEqual(ct.parse_command_details(["zstd", "-19", "big.bin"], "/w"), ("zstd", "/w/big.bin", ""))
 
 
+class Remote(unittest.TestCase):
+    def test_rclone_commands(self):
+        self.assertEqual(ct.rclone_subcommand(["rclone", "-q", "copy", "a", "gdrive:b"]), "copy")
+        # "rclone" contains "rc": only the command word decides.
+        self.assertIn(ct.rclone_subcommand(["rclone", "copy", "a", "gdrive:b"]), ct.RCLONE_TRANSFER_COMMANDS)
+        for sub in ("mount", "config", "rc", "rcd", "serve", "lsf", "version"):
+            self.assertNotIn(ct.rclone_subcommand(["/usr/bin/rclone", sub, "gdrive:"]), ct.RCLONE_TRANSFER_COMMANDS)
+
+    def test_rclone_option_values_are_not_paths(self):
+        line = "rclone copy --transfers 4 --drive-chunk-size 64M --stats 60s -q dji gdrive:raw/dji"
+        self.assertEqual(ct.parse_command_details(line.split(), "/data"),
+                         ("rclone copy", "/data/dji", "gdrive:raw/dji"))
+
+    def test_scp(self):
+        self.assertEqual(ct.parse_command_details("scp -P 2222 -r site host:/var/www".split(), "/w"),
+                         ("scp", "/w/site", "host:/var/www"))
+        self.assertEqual(ct.parse_command_details("scp host:big.iso .".split(), "/w"),
+                         ("scp", "host:big.iso", "/w"))
+
+    def test_direction(self):
+        self.assertEqual(ct.transfer_direction("rclone copy", "/d/x", "gdrive:b/"), "upload")
+        self.assertEqual(ct.transfer_direction("rsync", "host:a/", "/b/"), "download")
+        self.assertEqual(ct.transfer_direction("curl", "https://e.org/f", "/dl/f"), "download")
+        self.assertEqual(ct.transfer_direction("git push", "origin", "main"), "")
+        self.assertEqual(ct.transfer_direction("cp", "/a", "/b"), "")
+        self.assertEqual(ct.transfer_direction("idevicebackup2 backup", "", "/b"), "")
+
+    def test_progress_from_the_local_side_and_speed_from_the_socket(self):
+        # upload: 300 read from the source, 120 sent so far
+        self.assertEqual(ct.network_progress("upload", 200, 0, 300, 120), (300, 120))
+        # download: 500 received, 480 already written to the file
+        self.assertEqual(ct.network_progress("download", 0, 400, 500, 480), (480, 500))
+
+    def test_what_went_through_counts_sockets(self):
+        rc, wc = ct.get_tree_char_io([os.getpid()])
+        self.assertGreater(rc, 0)
+        self.assertEqual(ct.get_tree_char_io([2 ** 31 - 1]), (0, 0))
+
+
 class Tar(unittest.TestCase):
     def parse(self, line, cwd="/data"):
         return ct.parse_command_details(line.split(), cwd)

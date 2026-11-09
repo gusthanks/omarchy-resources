@@ -745,7 +745,7 @@ PanelKeyCatcher {
 
 
                 PlainText {
-                  text: Model.formatSpeed(modelData.active_speed)
+                  text: Model.directionArrow(modelData.direction) + Model.formatSpeed(modelData.active_speed)
                   color: monitor.accentColor
                   font.bold: true
                   font.pixelSize: Style.font.caption
@@ -1522,7 +1522,7 @@ PanelKeyCatcher {
 
               // Live speed badge
               PlainText {
-                text: Model.formatSpeed(modelData.active_speed)
+                text: Model.directionArrow(modelData.direction) + Model.formatSpeed(modelData.active_speed)
                 color: monitor.accentColor
                 font.pixelSize: Style.font.subtitle
                 font.bold: true
