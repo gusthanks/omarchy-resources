@@ -36,7 +36,10 @@ For screenshots, draw on a background layer (`WlrLayershell.layer: WlrLayer.Back
 Also run `omarchy plugin validate .`. What can't be rendered in isolation (live data in
 the real bar) is checked by the user after deploying, not by you on their live shell.
 
-## Deploy only at the end, and only when asked
+## Deploy once, at the end, and restart the bar
 
-When the change is finished, tested and committed, update the installed copy once (the
-shell hot-reloads it). Never use `omarchy refresh shell` (it resets the bar layout).
+When ALL the requested work is finished, tested in isolation and committed, update the
+installed copy once and then run `omarchy restart shell` once. The shell's hot reload is
+not reliable for plugins (the old version can stay on screen), so do not tell the user
+something is done before the restart ran. Never deploy or restart in the middle of a task,
+and never use `omarchy refresh shell` (it resets the bar layout).
