@@ -91,5 +91,9 @@
   "transfers.overallEstimateSource": "Overall progress (estimate: size of the source)",
   "transfers.scanning": "Working out the total size…",
   "transfers.written": "%1 written",
-  "transfers.transferredOf": "Transferred: %1 of %2 (%3%)"
+  "transfers.transferredOf": "Transferred: %1 of %2 (%3%)",
+  "transfers.action.pauseBatch": "Pause batch",
+  "transfers.action.resumeBatch": "Resume batch",
+  "transfers.action.cancelBatch": "Cancel batch",
+  "transfers.batchPaused": "paused"
 }

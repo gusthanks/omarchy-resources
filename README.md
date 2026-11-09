@@ -29,7 +29,9 @@ downloads, iPhone/iPad backups and more) with speed, progress and ETA.
   directory), a folder's total size is worked out in the background with `du`, and a card
   at the top adds everything up. A transfer started by a script (`bash backup.sh`, a
   Python script, `make`) is shown as a step of that **batch**, with the script's path, how
-  long it has been running and how much it has moved so far.
+  long it has been running and how much it has moved so far; **Pause batch** and **Cancel
+  batch** act on the whole script (cancelling one transfer only ends that step, and the
+  script moves on to the next).
 - **iPhone/iPad backups** (`idevicebackup2 backup`): the backup size is not known up front,
   so progress and ETA are estimated from the space used on the device and marked with
   **≈** and *(estimate)*.

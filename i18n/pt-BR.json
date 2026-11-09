@@ -91,5 +91,9 @@
   "transfers.overallEstimateSource": "Progresso geral (estimativa: tamanho da origem)",
   "transfers.scanning": "Calculando o tamanho total…",
   "transfers.written": "%1 gravados",
-  "transfers.transferredOf": "Transferido: %1 de %2 (%3%)"
+  "transfers.transferredOf": "Transferido: %1 de %2 (%3%)",
+  "transfers.action.pauseBatch": "Pausar lote",
+  "transfers.action.resumeBatch": "Continuar lote",
+  "transfers.action.cancelBatch": "Cancelar lote",
+  "transfers.batchPaused": "pausado"
 }

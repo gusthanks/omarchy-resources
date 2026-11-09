@@ -780,6 +780,16 @@ def find_batch(pid, read=read_proc, uid=None):
     return None
 
 
+def process_state(pid):
+    """The state letter of a process (R, S, D, T, Z), "" when it is gone."""
+    try:
+        with open(f"/proc/{pid}/stat", "r") as f:
+            data = f.read()
+        return data[data.rindex(")") + 2:].split()[0]
+    except (OSError, ValueError, IndexError):
+        return ""
+
+
 def process_elapsed(start_ticks, now):
     """Seconds a process has been running, from its start time in clock ticks."""
     try:
@@ -1052,6 +1062,7 @@ def collect_all_transfers():
                 # so this is everything the script moved so far.
                 b_rb, b_wb, _rss, _state = get_tree_io_and_stat(b_tree)
                 batch["total_bytes"] = max(b_rb, b_wb)
+                batch["state"] = "paused" if process_state(batch["pid"]) == "T" else "running"
                 batch["elapsed_sec"] = process_elapsed(batch.pop("start_ticks"), now)
                 batch["elapsed_str"] = format_eta(batch["elapsed_sec"])
 

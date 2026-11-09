@@ -195,6 +195,20 @@ class Batch(unittest.TestCase):
         self.assertEqual(ct.find_batch(50, read=read, uid=1000)["name"], "make deploy")
 
 
+class ProcessState(unittest.TestCase):
+    def test_reads_the_state_of_a_live_process_and_of_none(self):
+        self.assertIn(ct.process_state(os.getpid()), ("R", "S"))
+        self.assertEqual(ct.process_state(2 ** 31 - 1), "")
+
+    def test_a_batch_is_stopped_from_the_script_down(self):
+        # Pause/cancel walk the tree root first, so the script cannot start its
+        # next step while its current one is being signalled.
+        with mock.patch.object(ct, "get_process_tree", return_value=[30, 40, 50]), \
+                mock.patch.object(ct.os, "kill") as kill, mock.patch("builtins.print"):
+            ct.handle_action("cancel", "30")
+        self.assertEqual([c[0][0] for c in kill.call_args_list], [30, 40, 50])
+
+
 class Summary(unittest.TestCase):
     def test_totals_and_batches(self):
         b = {"pid": 7, "name": "up.sh"}

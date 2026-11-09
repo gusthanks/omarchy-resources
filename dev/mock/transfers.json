@@ -45,7 +45,8 @@
         "cwd": "/home/user",
         "total_bytes": 79456894976,
         "elapsed_sec": 1392,
-        "elapsed_str": "23m 12s"
+        "elapsed_str": "23m 12s",
+        "state": "running"
       },
       "overall_scanning": false,
       "overall_estimate_kind": "source"
@@ -83,7 +84,8 @@
         "cwd": "/home/user",
         "total_bytes": 79456894976,
         "elapsed_sec": 1392,
-        "elapsed_str": "23m 12s"
+        "elapsed_str": "23m 12s",
+        "state": "running"
       },
       "overall_scanning": false,
       "overall_estimate_kind": "device"
@@ -121,7 +123,8 @@
       "elapsed_sec": 1392,
       "elapsed_str": "23m 12s",
       "transfers": 2,
-      "active_speed": 103809024
+      "active_speed": 103809024,
+      "state": "running"
     }
   ]
 }

@@ -1382,8 +1382,9 @@ PanelKeyCatcher {
                   Layout.fillWidth: true
                 }
                 PlainText {
-                  text: tr.t("transfers.batchSteps").arg(modelData.transfers)
-                  color: Qt.darker(monitor.fgColor, 1.45)
+                  text: modelData.state === "paused" ? tr.t("transfers.batchPaused") : tr.t("transfers.batchSteps").arg(modelData.transfers)
+                  color: modelData.state === "paused" ? monitor.urgentColor : Qt.darker(monitor.fgColor, 1.45)
+                  font.bold: modelData.state === "paused"
                   font.pixelSize: Style.font.caption
                 }
               }
@@ -1399,6 +1400,29 @@ PanelKeyCatcher {
                 color: Qt.darker(monitor.fgColor, 1.6)
                 font.pixelSize: Style.font.caption
                 elide: Text.ElideMiddle
+              }
+
+              // The whole script: its current step and the ones still to come.
+              Item { width: 1; height: Style.space(4) }
+              Row {
+                width: parent.width
+                spacing: Style.space(6)
+
+                ActionBtn {
+                  text: modelData.state === "paused" ? tr.t("transfers.action.resumeBatch") : tr.t("transfers.action.pauseBatch")
+                  iconText: modelData.state === "paused" ? "\uf04b" : "\uf04c"
+                  onClicked: {
+                    if (modelData.state === "paused") monitor.resumeTransfer(modelData.pid)
+                    else monitor.pauseTransfer(modelData.pid)
+                  }
+                }
+
+                ActionBtn {
+                  text: tr.t("transfers.action.cancelBatch")
+                  iconText: "\uf00d"
+                  foreground: monitor.urgentColor
+                  onClicked: monitor.cancelTransfer(modelData.pid)
+                }
               }
             }
           }
