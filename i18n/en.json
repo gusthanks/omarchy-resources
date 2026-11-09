@@ -65,5 +65,22 @@
   "sensors.gpuClock": "GPU Clock",
   "sensors.ctxSwitches": "Context switches",
   "sensors.uptime": "Uptime",
-  "sensors.power": "Battery / Power"
+  "sensors.power": "Battery / Power",
+  "cpu.userSys": "User / Sys",
+  "overview.transfersLink": "All transfers →",
+  "transfers.copied": "Copied!",
+  "transfers.destFree": "%1: %2 free",
+  "transfers.elapsed": "Elapsed: %1",
+  "transfers.emptyHint": "Watches rsync, rclone, cp, dd, downloads, iPhone/iPad backups and local backups automatically.",
+  "transfers.eta": "ETA %1",
+  "transfers.etaEstimate": "ETA ≈ %1 (estimate)",
+  "transfers.overall": "Overall progress",
+  "transfers.overallEstimate": "Overall progress (estimate: device's used space)",
+  "transfers.pid": "PID %1",
+  "transfers.transferred": "Transferred: %1",
+  "transfers.recentLine": "%1 (%2 in %3)",
+  "transfers.tool.generic": "Transfer",
+  "transfers.tool.iosBackup": "iPhone/iPad backup",
+  "transfers.tool.iosRestore": "iPhone/iPad restore",
+  "transfers.tool.ios": "iPhone/iPad (%1)"
 }

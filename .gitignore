@@ -1,8 +1,16 @@
+# Never commit installed packages or caches (the tests need none)
+node_modules/
+.cache/
+coverage/
+dist/
+*.log
 __pycache__/
 *.py[cod]
 *$py.class
-*.log
-.cache/
-node_modules/
-dist/
 
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.bak*

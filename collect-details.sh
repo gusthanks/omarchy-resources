@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Fast, locale-safe detail collector for gusthx.resources popup panel.
-# Runs only while the popup panel is open.
+# Runs only while the popup panel is open (Monitor.qml, every 2.5 s).
 
 export LC_ALL=C
 
@@ -138,32 +138,52 @@ df -B1 -T -P -x tmpfs -x devtmpfs -x efivarfs -x squashfs -x overlay 2>/dev/null
   }
 '
 
-# 6b. Connected iPhones/iPads (libimobiledevice; cached ~30s to avoid hitting lockdownd every tick)
-if command -v idevice_id >/dev/null 2>&1 && command -v ideviceinfo >/dev/null 2>&1; then
-  ios_cache="${XDG_RUNTIME_DIR:-/tmp}/gusthx-resources-ios.tsv"
+# 6b. Connected iPhones/iPads (libimobiledevice). Each one becomes a DISK line
+# with fstype "afc" (no local mount point). Asking lockdownd every tick is slow,
+# so results are cached for 30 s in the per-user runtime directory, which
+# collect-transfers.py reads to estimate the size of an idevicebackup2 backup.
+# Cache columns: the 8 DISK columns, then the device UDID (not printed here).
+# Without idevice_id/ideviceinfo this does nothing.
+runtime_dir() {
+  # Same rule as runtime_dir() in collect-transfers.py: keep the two in sync.
+  local d="${XDG_RUNTIME_DIR:-}"
+  if [[ -n $d && -d $d && -w $d ]]; then echo "$d"; return; fi
+  d="/run/user/$(id -u)"
+  if [[ -d $d && -w $d ]]; then echo "$d"; return; fi
+  d="/tmp/gusthx-resources-$(id -u)"
+  mkdir -p -m 700 "$d" 2>/dev/null
+  if [[ -d $d && -O $d && ! -L $d ]]; then echo "$d"; return; fi
+  return 1
+}
+
+if command -v idevice_id >/dev/null 2>&1 && command -v ideviceinfo >/dev/null 2>&1 \
+  && ios_dir=$(runtime_dir); then
+  ios_cache="$ios_dir/gusthx-resources-ios.tsv"
   ios_now=$(date +%s)
   ios_mtime=$(stat -c %Y "$ios_cache" 2>/dev/null || echo 0)
   if (( ios_now - ios_mtime >= 30 )); then
-    {
+    (
+      umask 077
       for udid in $(timeout 2 idevice_id -l 2>/dev/null | sort -u); do
+        [[ $udid =~ ^[A-Za-z0-9-]+$ ]] || continue
         info=$(timeout 3 ideviceinfo -u "$udid" -q com.apple.disk_usage 2>/dev/null) || continue
         name=$(timeout 3 ideviceinfo -u "$udid" -k DeviceName 2>/dev/null | tr -d '\t\r\n')
         model=$(timeout 3 ideviceinfo -u "$udid" -k ProductType 2>/dev/null | tr -d '\t\r\n')
         kind=iPhone; [[ $model == iPad* ]] && kind=iPad
-        awk -v name="${name:-$kind}" -v model="${model:-iOS}" -v kind="$kind" '
+        awk -v name="${name:-$kind}" -v model="${model:-iOS}" -v kind="$kind" -v udid="$udid" '
           /^TotalDataCapacity:/   { total = $2 }
           /^AmountDataAvailable:/ { avail = $2 }
           END {
             if (total > 0) {
               used = total - avail
-              printf "DISK\t%s\tafc\t%s\t%.0f\t%.0f\t%.0f\t%d\n",
-                kind " · " name, model, total, used, avail, (used * 100 / total) + 0.5
+              printf "DISK\t%s\tafc\t%s\t%.0f\t%.0f\t%.0f\t%d\t%s\n",
+                kind " · " name, model, total, used, avail, (used * 100 / total) + 0.5, udid
             }
           }' <<<"$info"
-      done
-    } > "$ios_cache.tmp" 2>/dev/null && mv -f "$ios_cache.tmp" "$ios_cache"
+      done > "$ios_cache.tmp" 2>/dev/null && mv -f "$ios_cache.tmp" "$ios_cache"
+    )
   fi
-  cat "$ios_cache" 2>/dev/null
+  cut -f1-8 "$ios_cache" 2>/dev/null
 fi
 
 # 7. Top Processes by CPU (top 10) and by Memory (top 10)

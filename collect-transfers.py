@@ -13,13 +13,42 @@ import stat
 import signal
 import subprocess
 
-STATE_CACHE_FILE = "/dev/shm/omarchy-transfers-state.json"
 TRANSFER_COMMANDS = {
     "rsync", "rclone", "cp", "mv", "dd", "pv", "curl", "wget", "aria2c", "yt-dlp",
     "git", "idevicebackup2", "restic", "borg", "btrfs", "pacman", "yay", "paru", "tar", "zstd", "ffmpeg"
 }
 
 CURRENT_UID = os.getuid()
+
+
+def runtime_dir():
+    """Per-user runtime directory, same rule as runtime_dir() in collect-details.sh."""
+    d = os.environ.get("XDG_RUNTIME_DIR", "")
+    if d and os.path.isdir(d) and os.access(d, os.W_OK):
+        return d
+    d = f"/run/user/{CURRENT_UID}"
+    if os.path.isdir(d) and os.access(d, os.W_OK):
+        return d
+    d = f"/tmp/gusthx-resources-{CURRENT_UID}"
+    try:
+        os.makedirs(d, mode=0o700, exist_ok=True)
+        st = os.lstat(d)
+        if stat.S_ISDIR(st.st_mode) and st.st_uid == CURRENT_UID:
+            return d
+    except OSError:
+        pass
+    return None
+
+
+def runtime_file(name):
+    d = runtime_dir()
+    return os.path.join(d, name) if d else None
+
+
+# Speeds are deltas between runs, so the previous run is kept here (per user).
+STATE_FILE_NAME = "gusthx-resources-transfers.json"
+# Written by collect-details.sh: one DISK line per connected iPhone/iPad.
+IOS_CACHE_NAME = "gusthx-resources-ios.tsv"
 
 def format_bytes_py(b):
     for u in ["B", "KB", "MB", "GB", "TB"]:
@@ -329,10 +358,8 @@ def parse_command_details(args, cwd):
         return f"git {sub}", (pos_args[0] if pos_args else ""), (pos_args[1] if len(pos_args) > 1 else cwd)
 
     elif comm == "idevicebackup2":
-        pos_args = [a for a in args[1:] if not a.startswith("-")]
-        sub = pos_args[0] if pos_args else "backup"
-        dst = pos_args[-1] if len(pos_args) > 1 else cwd
-        return f"iPhone {sub}", "", dst
+        sub, _udid, dst = parse_idevicebackup2_args(args, cwd)
+        return f"idevicebackup2 {sub}", "", dst
 
     elif comm in ("pacman", "yay", "paru"):
         pkg_targets = [a for a in args[1:] if not a.startswith("-")]
@@ -342,6 +369,75 @@ def parse_command_details(args, cwd):
         return comm, f"Arch Repos ({pkg_desc})", "/var/cache/pacman/pkg"
 
     return comm, (args[1] if len(args) > 1 else ""), (args[-1] if len(args) > 2 else "")
+
+# idevicebackup2 [OPTIONS] CMD [CMDOPTIONS] DIRECTORY
+IDEVICEBACKUP2_OPTS_WITH_ARG = {"-u", "--udid", "-s", "--source", "--password"}
+
+
+def parse_idevicebackup2_args(args, cwd):
+    """Return (subcommand, udid, backup directory) of an idevicebackup2 command line.
+    Values of options such as `-u UDID` are skipped, so they are never taken
+    for the subcommand or the directory."""
+    pos_args = []
+    udid = ""
+    i = 1
+    while i < len(args):
+        a = args[i]
+        if "=" in a and a.split("=", 1)[0] in IDEVICEBACKUP2_OPTS_WITH_ARG:
+            if a.startswith(("-u=", "--udid=")):
+                udid = a.split("=", 1)[1]
+            i += 1
+            continue
+        if a in IDEVICEBACKUP2_OPTS_WITH_ARG:
+            if a in ("-u", "--udid") and i + 1 < len(args):
+                udid = args[i + 1]
+            i += 2
+            continue
+        if a.startswith("-"):
+            i += 1
+            continue
+        pos_args.append(a)
+        i += 1
+    sub = pos_args[0] if pos_args else "backup"
+    dst = pos_args[-1] if len(pos_args) > 1 else cwd
+    return sub, udid, dst
+
+
+def ios_used_bytes(udid=""):
+    """Space used on a connected iPhone/iPad: the closest thing to the size of a
+    full backup that is known up front (it is only an estimate). Read from the
+    cache collect-details.sh keeps; when that is missing, ask ideviceinfo once."""
+    rows = []
+    path = runtime_file(IOS_CACHE_NAME)
+    try:
+        with open(path) as fh:
+            for line in fh:
+                p = line.rstrip("\n").split("\t")
+                if len(p) >= 6 and p[0] == "DISK":
+                    rows.append((p[8] if len(p) > 8 else "", int(float(p[5]))))
+    except (OSError, TypeError, ValueError):
+        rows = []
+    if udid:
+        for row_udid, used in rows:
+            if row_udid == udid:
+                return used
+    elif rows:
+        return rows[0][1]
+    try:
+        cmd = ["ideviceinfo", "-q", "com.apple.disk_usage"]
+        if udid:
+            cmd[1:1] = ["-u", udid]
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=3).stdout
+    except (OSError, subprocess.SubprocessError):
+        return 0
+    total = avail = 0
+    for line in out.splitlines():
+        if line.startswith("TotalDataCapacity:"):
+            total = int(line.split()[1])
+        elif line.startswith("AmountDataAvailable:"):
+            avail = int(line.split()[1])
+    return max(0, total - avail) if total > 0 else 0
+
 
 def get_filesystem_info(path):
     """Query free and total space for the filesystem containing path."""
@@ -372,8 +468,9 @@ def get_filesystem_info(path):
 def load_previous_state():
     """Load previously cached metrics from RAM for speed calculations and completion tracking."""
     try:
-        if os.path.exists(STATE_CACHE_FILE):
-            with open(STATE_CACHE_FILE, "r") as f:
+        path = runtime_file(STATE_FILE_NAME)
+        if path and os.path.exists(path):
+            with open(path, "r") as f:
                 data = json.load(f)
                 if time.time() - data.get("timestamp", 0) < 15:
                     return data
@@ -389,8 +486,14 @@ def save_current_state(processes_dict, recent_completed):
             "processes": processes_dict,
             "recent_completed": recent_completed[:6]
         }
-        with open(STATE_CACHE_FILE, "w") as f:
+        path = runtime_file(STATE_FILE_NAME)
+        if not path:
+            return
+        tmp = path + ".tmp"
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
             json.dump(data, f)
+        os.replace(tmp, path)
     except Exception:
         pass
 
@@ -562,15 +665,16 @@ def collect_all_transfers():
                 if norm_src == norm_mnt:
                     overall_total_bytes = source_fs.get("used_bytes", 0)
 
-            if tool_name.startswith("iPhone backup") and overall_total_bytes == 0:
-                # Expected size = space used on the device (cached by collect-details.sh)
-                try:
-                    with open(f"/run/user/{CURRENT_UID}/gusthx-resources-ios.tsv") as fh:
-                        used = [int(l.split("\t")[5]) for l in fh if l.startswith("DISK\t")]
-                    if used:
-                        overall_total_bytes = used[0]
-                except Exception:
-                    pass
+            overall_is_estimate = False
+            if tool_name == "idevicebackup2 backup" and overall_total_bytes == 0:
+                # The backup size is not known up front: use the space used on the
+                # device, worked out once per backup and kept in the state file.
+                if prev and prev.get("estimated_total_bytes"):
+                    overall_total_bytes = prev["estimated_total_bytes"]
+                else:
+                    _sub, udid, _dst = parse_idevicebackup2_args(args, cwd)
+                    overall_total_bytes = ios_used_bytes(udid)
+                overall_is_estimate = overall_total_bytes > 0
 
             elapsed_sec = 0
             try:
@@ -636,7 +740,8 @@ def collect_all_transfers():
                 "source_fs": source_fs,
                 "overall_total_bytes": overall_total_bytes,
                 "overall_pct": overall_pct,
-                "overall_eta": overall_eta
+                "overall_eta": overall_eta,
+                "overall_is_estimate": overall_is_estimate
             }
             transfers.append(item_data)
 
@@ -651,7 +756,8 @@ def collect_all_transfers():
                 "elapsed_str": format_eta(elapsed_sec),
                 "tool": tool_name,
                 "source": src_path,
-                "destination": dst_path
+                "destination": dst_path,
+                "estimated_total_bytes": overall_total_bytes if overall_is_estimate else 0
             }
         except Exception:
             pass

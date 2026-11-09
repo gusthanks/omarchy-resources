@@ -451,9 +451,17 @@ function formatDuration(seconds) {
   return s + "s"
 }
 
+// Translate through the plugin's catalog when a translator (Monitor.t) is
+// given; the English fallback otherwise.
+function translate(tr, key, fallback) {
+  var value = typeof tr === "function" ? tr(key, fallback) : fallback
+  return (typeof value === "string" && value !== "" && value !== key) ? value : fallback
+}
+
 function toolIcon(tool) {
   if (!tool) return "\uf021"
   var t = String(tool).toLowerCase()
+  if (t.indexOf("idevicebackup2") === 0) return "\uf10b"
   if (t.indexOf("rsync") >= 0) return "\uf021"
   if (t.indexOf("rclone") >= 0) return "\uf0c2"
   if (t.indexOf("curl") >= 0 || t.indexOf("wget") >= 0 || t.indexOf("aria") >= 0 || t.indexOf("dlp") >= 0) return "\uf019"
@@ -465,9 +473,16 @@ function toolIcon(tool) {
   return "\uf021"
 }
 
-function toolDisplayTitle(tool) {
-  if (!tool) return "Transfer"
+function toolDisplayTitle(tool, tr) {
+  if (!tool) return translate(tr, "transfers.tool.generic", "Transfer")
   var t = String(tool).toLowerCase()
+  // collect-transfers.py reports "idevicebackup2 <command>" (backup, restore, ...).
+  if (t.indexOf("idevicebackup2") === 0) {
+    var sub = t.split(/\s+/)[1] || "backup"
+    if (sub === "backup") return translate(tr, "transfers.tool.iosBackup", "iPhone/iPad backup")
+    if (sub === "restore") return translate(tr, "transfers.tool.iosRestore", "iPhone/iPad restore")
+    return translate(tr, "transfers.tool.ios", "iPhone/iPad (%1)").replace("%1", neutralizeMarkup(sub, 16))
+  }
   if (t.indexOf("rsync") >= 0) return "rsync"
   if (t.indexOf("rclone") >= 0) return "rclone"
   if (t.indexOf("curl") >= 0) return "curl"
@@ -477,6 +492,32 @@ function toolDisplayTitle(tool) {
   if (t.indexOf("mv") >= 0) return "mv"
   if (t.indexOf("dd") >= 0) return "dd"
   return tool
+}
+
+// One line for a finished transfer: "rsync (1.2 GB in 3m 05s)". The size or the
+// time can be missing (the collector only knows what it saw).
+function formatRecentTransfer(item, tr) {
+  if (!item) return ""
+  var title = toolDisplayTitle(item.tool, tr)
+  var size = Number(item.total_bytes) > 0 ? formatBytes(item.total_bytes, 1) : ""
+  var elapsed = item.elapsed_str ? String(item.elapsed_str) : ""
+  if (size && elapsed) return translate(tr, "transfers.recentLine", "%1 (%2 in %3)").replace("%1", title).replace("%2", size).replace("%3", elapsed)
+  if (size || elapsed) return title + " (" + (size || elapsed) + ")"
+  return title
+}
+
+// The folder a Disks-tab entry opens. collect-details.sh merges Btrfs
+// subvolumes on one device into labels like "/ · /home" (prefer /home there).
+// Anything that is not an absolute path (an iPhone/iPad entry, "iPhone · Name")
+// has no folder to open: "".
+function diskOpenPath(mount) {
+  if (!mount) return ""
+  var target = String(mount).trim()
+  if (target.indexOf("·") >= 0 || target.indexOf("•") >= 0) {
+    var parts = target.split(/[·•]/).map(function(s) { return s.trim() })
+    target = parts.indexOf("/home") >= 0 ? "/home" : parts[0]
+  }
+  return target.charAt(0) === "/" ? target : ""
 }
 
 function shortenPath(p, maxLen) {
@@ -502,5 +543,19 @@ function parseJsonSafely(str, fallback) {
     return JSON.parse(str)
   } catch (e) {
     return fallback
+  }
+}
+
+// Lets the node tests (dev/tests/) load this file as is; QML ignores it.
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    MAX_HISTORY: MAX_HISTORY, neutralizeMarkup: neutralizeMarkup, clamp: clamp, pushHistory: pushHistory,
+    parseProcStat: parseProcStat, parseProcMeminfo: parseProcMeminfo, parseProcLoadavg: parseProcLoadavg,
+    parseProcUptime: parseProcUptime, parseProcNetDev: parseProcNetDev, parseProcDiskstats: parseProcDiskstats,
+    parseDetailsOutput: parseDetailsOutput, formatBytes: formatBytes, formatShortBytes: formatShortBytes,
+    formatRate: formatRate, formatShortRate: formatShortRate, formatSpeed: formatSpeed,
+    formatDuration: formatDuration, translate: translate, toolIcon: toolIcon, toolDisplayTitle: toolDisplayTitle,
+    formatRecentTransfer: formatRecentTransfer, diskOpenPath: diskOpenPath, shortenPath: shortenPath,
+    parseJsonSafely: parseJsonSafely
   }
 }
