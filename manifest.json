@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "gusthx.resources",
   "name": "Resource Monitor",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "author": "Gustavo Costa (gusthx)",
   "license": "MIT",
   "description": "System resource monitor for the bar: live CPU, memory, network, disk I/O, sensors, processes, disks (iPhone/iPad included) and background file transfers.",
