@@ -117,15 +117,19 @@ ShellRoot {
     var aggMoved = 0, aggTotal = 0, aggSpeed = 0, moved = 0
     for (var i = 0; i < d.transfers.length; i++) {
       var x = d.transfers[i]
+      // Only copies have a byte total; dry runs and verifications do not.
+      var isCopy = (x.kind || "transfer") === "transfer"
       var speed = x.active_speed * (1 + 0.06 * Math.sin(f * 0.7 + i * 2))
       var gained = x.active_speed * t
-      moved += gained
+      if (isCopy) moved += gained
       x.total_bytes += gained
       x.elapsed_sec += t
       x.elapsed_str = Model.formatDuration(x.elapsed_sec)
-      x.overall_pct = Math.round(x.total_bytes / x.overall_total_bytes * 1000) / 10
+      if (isCopy && x.overall_total_bytes > 0) {
+        x.overall_pct = Math.min(99.9, Math.round(x.total_bytes / x.overall_total_bytes * 1000) / 10)
+        x.overall_eta = paused || x.overall_total_kind === "upper_bound" ? "" : Model.formatDuration((x.overall_total_bytes - x.total_bytes) / speed)
+      }
       x.active_speed = paused ? 0 : speed
-      x.overall_eta = paused ? "" : Model.formatDuration((x.overall_total_bytes - x.total_bytes) / speed)
       if (paused) x.state = "paused"
       if (i === 0) {
         // rsync: a run of large videos, one after the other
@@ -148,8 +152,10 @@ ShellRoot {
         x.batch.elapsed_str = Model.formatDuration(x.batch.elapsed_sec)
         if (paused) x.batch.state = "paused"
       }
-      aggMoved += x.total_bytes
-      aggTotal += x.overall_total_bytes
+      if (isCopy) {
+        aggMoved += x.total_bytes
+        aggTotal += x.overall_total_bytes
+      }
       aggSpeed += x.active_speed
     }
     for (var b = 0; b < d.batches.length; b++) {
@@ -161,8 +167,11 @@ ShellRoot {
       if (paused) bt.state = "paused"
     }
     d.agg_total_bytes = aggMoved
-    d.agg_overall_total_bytes = aggTotal
-    d.agg_overall_pct = Math.round(aggMoved / aggTotal * 1000) / 10
+    // No combined % when the collector gave none (a total is unknown or an upper bound).
+    if (d.agg_overall_total_bytes > 0) {
+      d.agg_overall_total_bytes = aggTotal
+      d.agg_overall_pct = Math.min(99.9, Math.round(aggMoved / aggTotal * 1000) / 10)
+    }
     d.agg_speed = aggSpeed
     return d
   }

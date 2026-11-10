@@ -690,7 +690,7 @@ PanelKeyCatcher {
               PlainText {
                 id: speedText
                 anchors.centerIn: parent
-                text: Model.formatSpeed(monitor.aggTransferSpeed)
+                text: Model.formatDataRate(monitor.aggTransferSpeed, monitor.fmtNum)
                 color: monitor.accentColor
                 font.pixelSize: Style.font.caption
                 font.bold: true
@@ -745,18 +745,21 @@ PanelKeyCatcher {
 
 
                 PlainText {
-                  text: Model.directionArrow(modelData.direction) + Model.formatSpeed(modelData.active_speed)
-                  color: monitor.accentColor
-                  font.bold: true
+                  // Dry runs and listings copy nothing: their kind, not a speed.
+                  text: Model.isCheckKind(modelData) ? Model.kindLabel(modelData, monitor.t)
+                    : Model.directionArrow(modelData.direction) + Model.formatDataRate(modelData.active_speed, monitor.fmtNum)
+                  color: Model.isCheckKind(modelData) ? Qt.darker(monitor.fgColor, 1.35) : monitor.accentColor
+                  font.bold: !Model.isCheckKind(modelData)
                   font.pixelSize: Style.font.caption
                 }
               }
 
               PlainText {
-                visible: Boolean(modelData.destination || modelData.source)
-                text: modelData.source && modelData.destination
-                  ? (Model.transferPath(modelData.source, monitor.transferData.home) + " → " + Model.transferPath(modelData.destination, monitor.transferData.home))
-                  : Model.transferPath(modelData.source || modelData.destination, monitor.transferData.home)
+                readonly property string src: Model.sourceSummary(modelData, monitor.transferData.home, 38, monitor.t)
+                visible: Boolean(modelData.destination || src)
+                text: src && modelData.destination
+                  ? (src + " → " + Model.transferPath(modelData.destination, monitor.transferData.home))
+                  : (src || Model.transferPath(modelData.destination, monitor.transferData.home))
                 color: Qt.darker(monitor.fgColor, 1.35)
                 font.pixelSize: Style.font.caption
                 elide: Text.ElideMiddle
@@ -764,10 +767,13 @@ PanelKeyCatcher {
               }
 
               ProgressBarTrack {
-                visible: modelData.overall_total_bytes > 0
+                readonly property var overall: Model.describeOverall(modelData, monitor.t, monitor.fmtNum)
+                visible: overall.show
+                // An upper bound (du of the sources) is not a real total: dim.
+                opacity: overall.dim ? 0.5 : 1
                 width: parent.width
                 height: Style.space(5)
-                fraction: Math.max(0, Math.min(1, (modelData.overall_pct || 0) / 100.0))
+                fraction: overall.fraction
                 fillColor: monitor.accentColor
               }
             }
@@ -780,14 +786,14 @@ PanelKeyCatcher {
             spacing: Style.space(6)
 
             PlainText {
-              text: "\uf00c"
-              color: monitor.accentColor
+              text: Model.recentIcon(monitor.recentTransferList[0])
+              color: monitor.recentTransferList[0] && monitor.recentTransferList[0].outcome === "stopped" ? monitor.urgentColor : monitor.accentColor
               font.pixelSize: Style.font.caption
             }
 
             PlainText {
               text: monitor.recentTransferList[0]
-                ? Model.formatRecentTransfer(monitor.recentTransferList[0], monitor.t)
+                ? Model.formatRecentTransfer(monitor.recentTransferList[0], monitor.t, monitor.fmtNum)
                 : ""
               color: Qt.darker(monitor.fgColor, 1.4)
               font.pixelSize: Style.font.caption
@@ -1287,7 +1293,7 @@ PanelKeyCatcher {
 
       // Empty state
       SurfaceCard {
-        visible: monitor.transferList.length === 0
+        visible: monitor.transferList.length === 0 && (monitor.transferData.batches || []).length === 0
         Column {
           width: parent.width
           spacing: Style.space(4)
@@ -1310,7 +1316,9 @@ PanelKeyCatcher {
       // Everything at once: count, combined speed and progress, and the
       // scripts (batches) the transfers belong to.
       SurfaceCard {
-        visible: monitor.transferList.length > 0
+        // A batch between two steps (find, sort...) has no transfer but is
+        // still running: keep it (and its Pause/Cancel buttons) on screen.
+        visible: monitor.transferList.length > 0 || (monitor.transferData.batches || []).length > 0
 
         Column {
           width: parent.width
@@ -1326,13 +1334,15 @@ PanelKeyCatcher {
               font.pixelSize: Style.font.caption
             }
             PlainText {
-              text: tr.t("transfers.count").arg(monitor.transferCount)
+              text: monitor.checkCount > 0
+                ? tr.t("transfers.countMixed").arg(monitor.transferOnlyCount).arg(monitor.checkCount)
+                : tr.t("transfers.count").arg(monitor.transferCount)
               color: Qt.darker(monitor.fgColor, 1.45)
               font.pixelSize: Style.font.caption
             }
             Item { Layout.fillWidth: true }
             PlainText {
-              text: Model.formatSpeed(monitor.aggTransferSpeed)
+              text: Model.formatDataRate(monitor.aggTransferSpeed, monitor.fmtNum)
               color: monitor.accentColor
               font.bold: true
               font.pixelSize: Style.font.bodySmall
@@ -1349,11 +1359,14 @@ PanelKeyCatcher {
 
           PlainText {
             width: parent.width
+            // Copies only: dry runs and verifications move nothing to add up.
+            // No combined % unless every copy has a real total (the collector
+            // sends 0 when one is unknown or only an upper bound).
             text: (monitor.transferData.agg_overall_total_bytes || 0) > 0
-              ? tr.t("transfers.transferredOf").arg(Model.formatBytes(monitor.transferData.agg_total_bytes || 0))
-                  .arg((monitor.transferData.agg_overall_is_estimate ? "≈ " : "") + Model.formatBytes(monitor.transferData.agg_overall_total_bytes))
-                  .arg(monitor.transferData.agg_overall_pct || 0)
-              : tr.t("transfers.transferred").arg(Model.formatBytes(monitor.transferData.agg_total_bytes || 0))
+              ? tr.t("transfers.transferredOf").arg(Model.formatDataSize(monitor.transferData.agg_total_bytes || 0, monitor.fmtNum))
+                  .arg((monitor.transferData.agg_overall_is_estimate ? "≈ " : "") + Model.formatDataSize(monitor.transferData.agg_overall_total_bytes, monitor.fmtNum))
+                  .arg(monitor.fmtNum(Math.min(99.9, monitor.transferData.agg_overall_pct || 0), 1))
+              : tr.t("transfers.transferred").arg(Model.formatDataSize(monitor.transferData.agg_total_bytes || 0, monitor.fmtNum))
             color: Qt.darker(monitor.fgColor, 1.3)
             font.pixelSize: Style.font.caption
           }
@@ -1362,7 +1375,9 @@ PanelKeyCatcher {
             model: monitor.transferData.batches || []
 
             Column {
+              id: batchCol
               required property var modelData
+              readonly property var info: Model.describeBatch(modelData, monitor.t, monitor.fmtNum)
               width: parent.width
               spacing: Style.space(1)
 
@@ -1382,15 +1397,27 @@ PanelKeyCatcher {
                   Layout.fillWidth: true
                 }
                 PlainText {
-                  text: modelData.state === "paused" ? tr.t("transfers.batchPaused") : tr.t("transfers.batchSteps").arg(modelData.transfers)
-                  color: modelData.state === "paused" ? monitor.urgentColor : Qt.darker(monitor.fgColor, 1.45)
-                  font.bold: modelData.state === "paused"
+                  // Paused, its phase (copying, dry-run checks, verifying) or
+                  // what it runs between steps (find, sort...).
+                  text: batchCol.info.status
+                  color: batchCol.info.paused ? monitor.urgentColor : Qt.darker(monitor.fgColor, 1.45)
+                  font.bold: batchCol.info.paused
                   font.pixelSize: Style.font.caption
+                  elide: Text.ElideRight
+                  Layout.maximumWidth: batchCol.width * 0.5
                 }
               }
               PlainText {
+                // What its transfers copied so far (finished steps + live ones).
                 width: parent.width
-                text: tr.t("transfers.batchInfo").arg(modelData.elapsed_str || "").arg(Model.formatBytes(modelData.total_bytes || 0))
+                text: batchCol.info.info
+                color: Qt.darker(monitor.fgColor, 1.4)
+                font.pixelSize: Style.font.caption
+              }
+              PlainText {
+                visible: batchCol.info.steps !== ""
+                width: parent.width
+                text: batchCol.info.steps
                 color: Qt.darker(monitor.fgColor, 1.4)
                 font.pixelSize: Style.font.caption
               }
@@ -1435,8 +1462,15 @@ PanelKeyCatcher {
         model: monitor.transferList
 
         SurfaceCard {
+          id: transferCard
           required property var modelData
           required property int index
+          // simulation (rsync -n), listing or verification: not a copy.
+          readonly property string kind: Model.transferKind(modelData)
+          readonly property bool isCheck: Model.isCheckKind(modelData)
+          readonly property var overall: Model.describeOverall(modelData, monitor.t, monitor.fmtNum)
+          readonly property string scanText: Model.describeScan(modelData, monitor.t, monitor.fmtNum)
+          readonly property string planText: Model.describePlan(modelData, monitor.t, monitor.fmtNum)
 
           border.color: index === monitor.selectedTransferIndex
             ? monitor.accentColor
@@ -1452,11 +1486,14 @@ PanelKeyCatcher {
               width: parent.width
               spacing: Style.space(6)
 
-              // Tool pill
+              // Tool pill ("rsync", "rsync · Dry run", "sha256sum · Verification").
+              // Dry runs and listings get the quiet colors of the PID pill.
               Rectangle {
                 radius: Style.cornerRadius
-                color: Qt.rgba(monitor.accentColor.r, monitor.accentColor.g, monitor.accentColor.b, 0.16)
-                border.width: 1
+                color: transferCard.isCheck
+                  ? Qt.rgba(monitor.fgColor.r, monitor.fgColor.g, monitor.fgColor.b, 0.08)
+                  : Qt.rgba(monitor.accentColor.r, monitor.accentColor.g, monitor.accentColor.b, 0.16)
+                border.width: transferCard.isCheck ? 0 : 1
                 border.color: Qt.rgba(monitor.accentColor.r, monitor.accentColor.g, monitor.accentColor.b, 0.3)
                 implicitWidth: toolRow.implicitWidth + Style.space(10)
                 implicitHeight: Style.space(22)
@@ -1467,12 +1504,13 @@ PanelKeyCatcher {
                   spacing: Style.space(4)
                   PlainText {
                     text: Model.toolIcon(modelData.tool)
-                    color: monitor.accentColor
+                    color: transferCard.isCheck ? Qt.darker(monitor.fgColor, 1.2) : monitor.accentColor
                     font.pixelSize: Style.font.caption
                   }
                   PlainText {
                     text: Model.toolDisplayTitle(modelData.tool, monitor.t)
-                    color: monitor.accentColor
+                      + (transferCard.kind !== "transfer" ? " · " + Model.kindLabel(modelData, monitor.t) : "")
+                    color: transferCard.isCheck ? Qt.darker(monitor.fgColor, 1.2) : monitor.accentColor
                     font.pixelSize: Style.font.caption
                     font.bold: true
                   }
@@ -1520,13 +1558,26 @@ PanelKeyCatcher {
 
               Item { Layout.fillWidth: true }
 
-              // Live speed badge
+              // Live speed badge (none for a dry run: nothing is copied)
               PlainText {
-                text: Model.directionArrow(modelData.direction) + Model.formatSpeed(modelData.active_speed)
+                visible: !transferCard.isCheck
+                text: Model.directionArrow(modelData.direction) + Model.formatDataRate(modelData.active_speed, monitor.fmtNum)
                 color: monitor.accentColor
                 font.pixelSize: Style.font.subtitle
                 font.bold: true
               }
+            }
+
+            // What a non-copy is doing, in plain words.
+            PlainText {
+              visible: transferCard.kind !== "transfer"
+              width: parent.width
+              text: transferCard.kind === "simulation" ? tr.t("transfers.simulationNote")
+                : transferCard.kind === "listing" ? tr.t("transfers.listingNote")
+                : tr.t("transfers.verifyNote")
+              color: Qt.darker(monitor.fgColor, 1.4)
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
             }
 
             // The script this transfer is a step of
@@ -1559,7 +1610,7 @@ PanelKeyCatcher {
               spacing: Style.space(2)
 
               RowLayout {
-                visible: Boolean(modelData.source)
+                visible: Boolean(modelData.source || (modelData.sources && modelData.sources.length > 0))
                 width: parent.width
                 spacing: Style.space(8)
                 Text {
@@ -1573,7 +1624,8 @@ PanelKeyCatcher {
                 }
                 PlainText {
                   // The whole path, on up to two lines: where it is matters.
-                  text: Model.transferPath(modelData.source, monitor.transferData.home, 84)
+                  // Several sources: the first one and "(+8 more)".
+                  text: Model.sourceSummary(modelData, monitor.transferData.home, 84, monitor.t)
                   color: monitor.fgColor
                   font.pixelSize: Style.font.caption
                   wrapMode: Text.WrapAnywhere
@@ -1608,9 +1660,10 @@ PanelKeyCatcher {
               }
             }
 
-            // Overall Sync Progress
+            // Overall progress: exact (rsync's own dry run), estimate (≈),
+            // upper bound (≤, dim bar, no ETA) or beyond the estimate.
             Rectangle {
-              visible: Boolean(modelData.overall_total_bytes > 0)
+              visible: transferCard.overall.show
               width: parent.width
               implicitHeight: overallCol.implicitHeight + Style.space(12)
               radius: Style.cornerRadius
@@ -1628,48 +1681,70 @@ PanelKeyCatcher {
                   width: parent.width
                   spacing: Style.space(6)
                   PlainText {
-                    text: "\uf021"
+                    id: overallIcon
+                    text: transferCard.kind === "verification" ? "\uf132" : "\uf021"
                     color: monitor.accentColor
                     font.pixelSize: Style.font.bodySmall
                   }
                   PlainText {
-                    text: !modelData.overall_is_estimate ? tr.t("transfers.overall")
-                      : modelData.overall_estimate_kind === "source" ? tr.t("transfers.overallEstimateSource") : tr.t("transfers.overallEstimate")
+                    text: transferCard.overall.label
                     font.bold: true
                     font.pixelSize: Style.font.bodySmall
+                    width: parent.width - overallIcon.implicitWidth - Style.space(6)
                   }
                 }
 
                 ProgressBarTrack {
                   width: parent.width
                   height: Style.space(6)
-                  fraction: Math.min(1.0, Math.max(0.0, modelData.overall_pct / 100.0))
+                  opacity: transferCard.overall.dim ? 0.5 : 1
+                  fraction: transferCard.overall.fraction
                   fillColor: monitor.accentColor
                 }
 
                 PlainText {
                   width: parent.width
                   horizontalAlignment: Text.AlignRight
-                  text: Model.formatBytes(modelData.total_bytes) + " / " + (modelData.overall_is_estimate ? "≈ " : "")
-                    + Model.formatBytes(modelData.overall_total_bytes) + " (" + (modelData.overall_is_estimate ? "≈ " : "") + modelData.overall_pct + "%)"
-                    + (modelData.overall_eta ? " · " + tr.t(modelData.overall_is_estimate ? "transfers.etaEstimate" : "transfers.eta").arg(modelData.overall_eta) : "")
-                  color: Qt.darker(monitor.fgColor, 1.4)
+                  text: transferCard.overall.line + (transferCard.overall.etaText ? " · " + transferCard.overall.etaText : "")
+                  color: transferCard.overall.beyond ? monitor.urgentColor : Qt.darker(monitor.fgColor, 1.4)
                   font.pixelSize: Style.font.caption
+                  wrapMode: Text.WordWrap
                 }
               }
             }
 
+            // rsync's own plan: what is left to copy vs what was selected.
             PlainText {
-              visible: Boolean(modelData.overall_scanning)
+              visible: transferCard.planText !== ""
               width: parent.width
-              text: "\uf021  " + tr.t("transfers.scanning")
+              text: transferCard.planText
               color: Qt.darker(monitor.fgColor, 1.4)
               font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
+            }
+
+            PlainText {
+              visible: transferCard.scanText !== ""
+              width: parent.width
+              text: "\uf021  " + transferCard.scanText
+              color: Qt.darker(monitor.fgColor, 1.4)
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
+            }
+
+            // The folder a dry run is going through (no file is copied).
+            PlainText {
+              visible: !modelData.active_file && Boolean(modelData.active_dir)
+              width: parent.width
+              text: "\uf07b  " + tr.t("transfers.checking").arg(Model.transferPath(modelData.active_dir, monitor.transferData.home, 84))
+              color: Qt.darker(monitor.fgColor, 1.35)
+              font.pixelSize: Style.font.caption
+              elide: Text.ElideMiddle
             }
 
             // Active file progress
             Rectangle {
-              visible: modelData.active_file !== null
+              visible: Boolean(modelData.active_file)
               width: parent.width
               implicitHeight: fileCol.implicitHeight + Style.space(12)
               radius: Style.cornerRadius
@@ -1712,8 +1787,8 @@ PanelKeyCatcher {
                   width: parent.width
                   horizontalAlignment: Text.AlignRight
                   text: !modelData.active_file ? ""
-                    : modelData.active_file.writing ? tr.t("transfers.written").arg(Model.formatBytes(modelData.active_file.size))
-                    : Model.formatBytes(modelData.active_file.pos) + " / " + Model.formatBytes(modelData.active_file.size) + " (" + modelData.active_file.pct + "%)" + (modelData.file_eta ? " · " + tr.t("transfers.eta").arg(modelData.file_eta) : "")
+                    : modelData.active_file.writing ? tr.t("transfers.written").arg(Model.formatDataSize(modelData.active_file.size, monitor.fmtNum))
+                    : Model.formatDataSize(modelData.active_file.pos, monitor.fmtNum) + " / " + Model.formatDataSize(modelData.active_file.size, monitor.fmtNum) + " (" + modelData.active_file.pct + "%)" + (modelData.file_eta ? " · " + tr.t("transfers.eta").arg(modelData.file_eta) : "")
                   color: Qt.darker(monitor.fgColor, 1.4)
                   font.pixelSize: Style.font.caption
                 }
@@ -1726,7 +1801,11 @@ PanelKeyCatcher {
               spacing: Style.space(12)
 
               PlainText {
-                text: tr.t("transfers.transferred").arg(Model.formatBytes(modelData.total_bytes))
+                // A dry run moves nothing; a verification reads, it does not copy.
+                visible: !transferCard.isCheck
+                text: transferCard.kind === "verification"
+                  ? tr.t("transfers.verifyRead").arg(Model.formatDataSize(modelData.total_bytes, monitor.fmtNum))
+                  : tr.t("transfers.transferred").arg(Model.formatDataSize(modelData.total_bytes, monitor.fmtNum))
                 color: Qt.darker(monitor.fgColor, 1.3)
                 font.pixelSize: Style.font.caption
               }
@@ -1738,8 +1817,8 @@ PanelKeyCatcher {
               }
 
               PlainText {
-                visible: modelData.dest_fs !== null
-                text: modelData.dest_fs ? tr.t("transfers.destFree").arg(modelData.dest_fs.name).arg(Model.formatBytes(modelData.dest_fs.free_bytes)) : ""
+                visible: Boolean(modelData.dest_fs)
+                text: modelData.dest_fs ? tr.t("transfers.destFree").arg(modelData.dest_fs.name).arg(Model.formatDataSize(modelData.dest_fs.free_bytes, monitor.fmtNum)) : ""
                 color: Qt.darker(monitor.fgColor, 1.3)
                 font.pixelSize: Style.font.caption
               }
@@ -1807,20 +1886,30 @@ PanelKeyCatcher {
               spacing: Style.space(8)
 
               PlainText {
-                text: "\uf00c"
-                color: monitor.accentColor
+                text: Model.recentIcon(modelData)
+                color: modelData.outcome === "stopped" ? monitor.urgentColor : monitor.accentColor
                 font.pixelSize: Style.font.bodySmall
               }
 
               PlainText {
-                text: Model.toolDisplayTitle(modelData.tool, monitor.t)
+                // "rsync", "sha256sum · Verification", "Batch: backup.sh"
+                text: Model.transferKind(modelData) === "batch"
+                  ? tr.t("transfers.batch") + ": " + (modelData.name || "")
+                  : Model.toolDisplayTitle(modelData.tool, monitor.t)
+                    + (Model.transferKind(modelData) === "verification" ? " · " + Model.kindLabel(modelData, monitor.t) : "")
                 font.bold: true
                 font.pixelSize: Style.font.caption
+                elide: Text.ElideMiddle
+                Layout.maximumWidth: implicitWidth
+                Layout.fillWidth: true
               }
 
               PlainText {
-                text: modelData.total_bytes ? Model.formatBytes(modelData.total_bytes) : ""
-                color: Qt.darker(monitor.fgColor, 1.3)
+                // Stopped early: how far it got of its total.
+                text: modelData.outcome === "stopped" && modelData.overall_total_bytes > 0
+                  ? Model.formatDataSize(modelData.total_bytes, monitor.fmtNum) + " / " + Model.formatDataSize(modelData.overall_total_bytes, monitor.fmtNum)
+                  : modelData.total_bytes ? Model.formatDataSize(modelData.total_bytes, monitor.fmtNum) : ""
+                color: modelData.outcome === "stopped" ? monitor.urgentColor : Qt.darker(monitor.fgColor, 1.3)
                 font.pixelSize: Style.font.caption
               }
 

@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.3.0 (2026-11-10)
+
+### Transfers: follow a copy as it really happens
+
+- **Real total for `rsync`**: the size comes from rsync itself (a background
+  `rsync --dry-run --stats` with the same options, once per command, at `nice 19` +
+  `ionice -c3`), so it honours `--exclude`/`--exclude-from`/`--files-from`, every source
+  (not just the last one) and what the destination already has. Cloud-only placeholder
+  files (iCloud/OneDrive: a size but no data on disk) no longer inflate it. Remote rsync
+  falls back to disk usage (`du -B1`, not apparent size), shown as an upper bound.
+- **Progress counts what is written**: for a local copy, the bytes the rsync receiver
+  writes, not the sender's metadata reads. Uploads and downloads count the tool and the
+  `ssh` pipe separately (no more double counting). `tar`, `cp` and `mv` have their own
+  counters.
+- **Dry runs and listings** (`-n`, `--dry-run`, grouped like `-avn`, `--list-only`) show
+  as a quiet "simulation": no %, no ETA, no size scan, no "completed" notification.
+- **Checksum verification** (`sha256sum`/`md5sum`/`b2sum`/`b3sum`/`xxhsum`, with or without
+  `-c`) is listed as a verification step with its own progress (position in the manifest,
+  or bytes hashed).
+- **Batches** add up their transfers' bytes (not every read of the script, `find` or the
+  hashing) and show the current phase (copying, simulation, verification, between
+  steps). A step that finished with an exact total is credited in full.
+- Honest estimates: "beyond the estimate" instead of a stuck 100%, "at most ≈ X" and no
+  ETA when the total is only an upper bound, elapsed time from the process start.
+- Full table of rsync options that take a value (from rsync 3.5.1 `--help`).
+- Notifications come from the UI, once per event; simulations never notify.
+
 ## 1.2.0 (2026-11-09)
 
 ### Transfers

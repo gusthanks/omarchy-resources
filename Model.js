@@ -462,6 +462,8 @@ function toolIcon(tool) {
   if (!tool) return "\uf021"
   var t = String(tool).toLowerCase()
   if (t.indexOf("idevicebackup2") === 0) return "\uf10b"
+  // Checksum tools (sha256sum, md5sum, b2sum, xxh64sum, ...): verification.
+  if (/^[a-z0-9]*sum$/.test(t.split(/\s+/)[0])) return "\uf132"
   if (t.indexOf("rsync") >= 0) return "\uf021"
   if (t.indexOf("rclone") >= 0) return "\uf0c2"
   if (t.indexOf("curl") >= 0 || t.indexOf("wget") >= 0 || t.indexOf("aria") >= 0 || t.indexOf("dlp") >= 0) return "\uf019"
@@ -495,16 +497,326 @@ function toolDisplayTitle(tool, tr) {
   return tool
 }
 
-// One line for a finished transfer: "rsync (1.2 GB in 3m 05s)". The size or the
-// time can be missing (the collector only knows what it saw).
-function formatRecentTransfer(item, tr) {
+// ---- Transfers: SI units, kinds and honest progress ----
+// Transfers use decimal (SI) units, like rsync --stats, du --si and file
+// managers: 1 GB = 1000^3 bytes. RAM and disks keep formatBytes.
+
+function _numFmt(fmt) {
+  return typeof fmt === "function" ? fmt : function(v, d) { return Number(v).toFixed(d || 0) }
+}
+
+function _sizeDecimals(unitIndex, value) {
+  if (unitIndex <= 2) return 0
+  if (unitIndex === 3) return value < 10 ? 2 : 1
+  return 2
+}
+
+function formatDataSize(bytes, fmt) {
+  var f = _numFmt(fmt)
+  var units = ["B", "kB", "MB", "GB", "TB", "PB"]
+  var v = Math.max(0, Number(bytes) || 0)
+  var i = 0
+  while (v >= 1000 && i < units.length - 1) { v /= 1000; i++ }
+  var d = _sizeDecimals(i, v)
+  // 999.6 kB would round to "1000 kB": show "1 MB" instead.
+  if (i < units.length - 1 && Number(v.toFixed(d)) >= 1000) { v /= 1000; i++; d = _sizeDecimals(i, v) }
+  if (i === 0) v = Math.round(v)
+  return f(v, d) + " " + units[i]
+}
+
+function formatDataRate(bps, fmt) {
+  var f = _numFmt(fmt)
+  var units = ["B/s", "kB/s", "MB/s", "GB/s"]
+  var decimals = [0, 0, 1, 2]
+  var v = Math.max(0, Number(bps) || 0)
+  var i = 0
+  while (v >= 1000 && i < units.length - 1) { v /= 1000; i++ }
+  if (i < units.length - 1 && Number(v.toFixed(decimals[i])) >= 1000) { v /= 1000; i++ }
+  if (i === 0) v = Math.round(v)
+  return f(v, decimals[i]) + " " + units[i]
+}
+
+// Replaces every %n in one pass, so a value that contains "%2" (a path, a
+// script name) is never substituted again.
+function fillArgs(template, args) {
+  return String(template).replace(/%(\d)/g, function(m, n) {
+    var k = parseInt(n, 10) - 1
+    return k >= 0 && k < args.length ? String(args[k]) : m
+  })
+}
+
+// "transfer" (also for collectors that predate kinds), "simulation" (rsync -n),
+// "listing" (rsync --list-only) or "verification" (sha256sum -c and friends).
+function transferKind(item) {
+  return (item && item.kind) ? String(item.kind) : "transfer"
+}
+
+// Dry runs and listings: nothing is copied, so no speed, no %, no ETA.
+function isCheckKind(item) {
+  var k = transferKind(item)
+  return k === "simulation" || k === "listing"
+}
+
+function kindLabel(item, tr) {
+  var k = transferKind(item)
+  if (k === "simulation") return translate(tr, "transfers.kind.simulation", "Dry run")
+  if (k === "listing") return translate(tr, "transfers.kind.listing", "Listing")
+  if (k === "verification") {
+    if (item && item.verify_mode === "hash") return translate(tr, "transfers.kind.hashing", "Computing checksums")
+    return translate(tr, "transfers.kind.verification", "Verification")
+  }
+  return ""
+}
+
+// The first source, plus "(+8 more)" when one command copies several.
+function sourceSummary(item, home, maxLen, tr) {
   if (!item) return ""
-  var title = toolDisplayTitle(item.tool, tr)
-  var size = Number(item.total_bytes) > 0 ? formatBytes(item.total_bytes, 1) : ""
+  var list = Array.isArray(item.sources) ? item.sources : []
+  var first = list.length > 0 ? list[0] : item.source
+  if (!first) return ""
+  var count = Math.max(Number(item.source_count) || 0, list.length, 1)
+  var base = transferPath(first, home, maxLen)
+  if (count <= 1) return base
+  return fillArgs(translate(tr, "transfers.sourcesMore", "%1 (+%2 more)"), [base, count - 1])
+}
+
+// What kind of total a transfer has: "exact", "estimate", "upper_bound" or "",
+// and where it came from. Older collectors only sent overall_is_estimate and
+// overall_estimate_kind ("device" / "source").
+function overallTotalKind(item) {
+  if (!item) return { kind: "", source: "" }
+  if (typeof item.overall_total_kind === "string" && (item.overall_total_kind !== "" || item.overall_total_source !== undefined)) {
+    return { kind: item.overall_total_kind, source: String(item.overall_total_source || "") }
+  }
+  if (!(Number(item.overall_total_bytes) > 0)) return { kind: "", source: "" }
+  if (!item.overall_is_estimate) return { kind: "exact", source: "" }
+  if (item.overall_estimate_kind === "device") return { kind: "estimate", source: "device" }
+  if (item.overall_estimate_kind === "source") return { kind: "estimate", source: "du" }
+  return { kind: "estimate", source: "" }
+}
+
+function _pctText(pct, fmt) {
+  var p = Math.round((Number(pct) || 0) * 10) / 10
+  return _numFmt(fmt)(p, p === Math.floor(p) ? 0 : 1)
+}
+
+// Everything the overall-progress box shows for one item:
+// {show, fraction, dim, beyond, label, line, etaText}.
+// - exact totals: "41.9 GB / 68.7 GB (60.9%)" and "ETA 5m 06s"
+// - estimates: "≈" on the total and an "ETA ≈" text
+// - upper bounds (du of the sources): "≤" on the total, "≥" on the %, a dim bar
+//   and no ETA (the real total can be much smaller)
+// - beyond: more moved than the total said; no stuck 100%, no ETA
+// - verification by list position: "% of the list checked"
+function describeOverall(item, tr, fmt) {
+  var none = { show: false, fraction: 0, dim: false, beyond: false, label: "", line: "", etaText: "" }
+  if (!item || isCheckKind(item)) return none
+  var tk = overallTotalKind(item)
+  var total = Number(item.overall_total_bytes) || 0
+  var moved = Number(item.total_bytes) || 0
+  var listFraction = item.verify ? Number(item.verify.list_fraction) : -1
+  var listMode = item.progress_basis === "list" && isFinite(listFraction) && listFraction >= 0
+  if (!(total > 0) && !listMode) return none
+
+  var res = { show: true, fraction: 0, dim: false, beyond: false, label: "", line: "", etaText: "" }
+  var kind = tk.kind || (listMode ? "estimate" : "exact")
+  var reason = String(item.overall_eta_reason || "")
+  var eta = item.overall_eta ? String(item.overall_eta) : ""
+
+  if (listMode) {
+    var lpct = Number(item.overall_pct) > 0 ? Number(item.overall_pct) : Math.min(99.9, listFraction * 100)
+    res.fraction = Math.max(0, Math.min(1, listFraction))
+    res.label = translate(tr, "transfers.verifyProgress", "Verification progress (position in the list)")
+    res.line = fillArgs(translate(tr, "transfers.verifyListLine", "%1% of the list checked"), [_pctText(lpct, fmt)])
+  } else {
+    var prefix = kind === "upper_bound" ? "≤ " : kind === "exact" ? "" : "≈ "
+    // moved / (an upper bound) is a lower bound on the real progress.
+    var pctPrefix = kind === "upper_bound" ? "≥ " : prefix
+    if (kind === "upper_bound") {
+      res.label = translate(tr, "transfers.overallUpperBound", "Overall progress (at most: size of the sources)")
+      res.dim = true
+    } else if (kind === "exact") {
+      res.label = translate(tr, "transfers.overall", "Overall progress")
+    } else if (tk.source === "du" || tk.source === "mount") {
+      res.label = translate(tr, "transfers.overallEstimateSource", "Overall progress (estimate: size of the source)")
+    } else if (tk.source === "batch") {
+      res.label = translate(tr, "transfers.overallEstimateBatch", "Overall progress (estimate: what this batch copied)")
+    } else if (tk.source === "device" || tk.source === "") {
+      res.label = translate(tr, "transfers.overallEstimate", "Overall progress (estimate: device's used space)")
+    } else {
+      res.label = translate(tr, "transfers.overall", "Overall progress")
+    }
+    // Older collectors had no overall_beyond: past the total means beyond too.
+    res.beyond = item.overall_beyond === true || (item.overall_beyond === undefined && moved > total)
+    if (res.beyond) {
+      res.fraction = 1
+      res.line = fillArgs(translate(tr, "transfers.beyondEstimate", "%1 so far, more than the estimated %2"),
+                          [formatDataSize(moved, fmt), prefix + formatDataSize(total, fmt)])
+      return res
+    }
+    var pct = Number(item.overall_pct)
+    if (!isFinite(pct) || pct < 0) pct = 0
+    if (!(pct > 0) && moved > 0) pct = moved / total * 100
+    pct = Math.min(99.9, pct)
+    res.fraction = Math.max(0, Math.min(1, pct / 100))
+    res.line = formatDataSize(moved, fmt) + " / " + prefix + formatDataSize(total, fmt) + " (" + pctPrefix + _pctText(pct, fmt) + "%)"
+  }
+
+  if (kind === "upper_bound") {
+    res.etaText = translate(tr, "transfers.noEtaUpperBound", "no ETA: the total is only an upper bound")
+  } else if (eta) {
+    res.etaText = kind === "exact"
+      ? fillArgs(translate(tr, "transfers.eta", "ETA %1"), [eta])
+      : fillArgs(translate(tr, "transfers.etaEstimate", "ETA ≈ %1 (estimate)"), [eta])
+  } else if (reason === "upper_bound") {
+    res.etaText = translate(tr, "transfers.noEtaUpperBound", "no ETA: the total is only an upper bound")
+  } else if (reason === "measuring") {
+    res.etaText = translate(tr, "transfers.etaMeasuring", "measuring speed…")
+  } else if (reason === "paused") {
+    res.etaText = translate(tr, "transfers.etaPaused", "paused, no ETA")
+  } else if (reason === "stalled") {
+    res.etaText = translate(tr, "transfers.etaStalled", "stalled, no ETA")
+  } else if (reason === "too_long") {
+    res.etaText = translate(tr, "transfers.etaTooLong", "more than 3 days left")
+  }
+  return res
+}
+
+// The line under the overall box while the total is being worked out (the
+// rsync dry run or du in the background), or why it could not be.
+function describeScan(item, tr, fmt) {
+  if (!item || isCheckKind(item)) return ""
+  var scan = item.scan
+  if (scan && typeof scan === "object") {
+    var st = String(scan.state || "")
+    if (st === "queued") return translate(tr, "transfers.scanQueued", "Waiting to work out what is left to copy")
+    if (st === "scanning") {
+      var found = Number(scan.found_bytes) || 0
+      if (found > 0) return fillArgs(translate(tr, "transfers.scanningFound", "Working out what is left to copy… %1 found so far"), [formatDataSize(found, fmt)])
+      return translate(tr, "transfers.scanning", "Working out the total size…")
+    }
+    if (st === "skipped" && scan.reason === "remote") return translate(tr, "transfers.scanSkippedRemote", "Remote transfer: the total is not known")
+    if (st === "failed" || st === "skipped") return translate(tr, "transfers.scanFailed", "Could not work out the total size")
+    return ""
+  }
+  return item.overall_scanning ? translate(tr, "transfers.scanning", "Working out the total size…") : ""
+}
+
+// "To copy: 68.7 GB (113.0 GB selected, 44.3 GB already at the destination)".
+function describePlan(item, tr, fmt) {
+  var plan = item && item.rsync_plan
+  if (!plan || typeof plan !== "object") return ""
+  var sel = Number(plan.selection_bytes) || 0
+  var toCopy = Number(plan.to_copy_bytes) || 0
+  if (!(sel > 0) && !(toCopy > 0)) return ""
+  var there = Number(plan.already_there_bytes)
+  if (!isFinite(there) || there < 0) there = 0
+  if (!(there > 0)) there = Math.max(0, sel - toCopy)
+  return fillArgs(translate(tr, "transfers.rsyncPlan", "To copy: %1 (%2 selected, %3 already at the destination)"),
+                  [formatDataSize(toCopy, fmt), formatDataSize(sel, fmt), formatDataSize(there, fmt)])
+}
+
+// A batch (the script running the transfers): {status, info, steps, between,
+// paused}. There is no batch % on purpose: the script's next steps are unknown.
+function describeBatch(batch, tr, fmt) {
+  var res = { status: "", info: "", steps: "", between: false, paused: false }
+  if (!batch) return res
+  var live = Number(batch.transfers) || 0
+  var phase = String(batch.phase || "")
+  res.paused = batch.state === "paused"
+  res.between = live <= 0 || phase === "other"
+  if (res.paused) {
+    res.status = translate(tr, "transfers.batchPaused", "paused")
+  } else if (phase === "simulation") {
+    res.status = translate(tr, "transfers.batchPhase.simulation", "checking (dry run)")
+  } else if (phase === "verification") {
+    res.status = translate(tr, "transfers.batchPhase.verification", "verifying")
+  } else if (!res.between) {
+    res.status = fillArgs(translate(tr, "transfers.batchSteps", "%1 running now"), [live])
+  } else {
+    var cmds = Array.isArray(batch.current_commands)
+      ? batch.current_commands.slice(0, 4).map(function(c) { return neutralizeMarkup(c, 24) }).filter(function(c) { return c !== "" })
+      : []
+    res.status = cmds.length > 0
+      ? fillArgs(translate(tr, "transfers.batchBetween", "between steps: %1"), [cmds.join(", ")])
+      : translate(tr, "transfers.batchIdle", "between steps")
+  }
+  // The monitor can start in the middle of a script (after a deploy or a
+  // reboot of the bar): with nothing seen copied yet, "0 B copied" would lie.
+  var copied = Number(batch.total_bytes) || 0
+  res.info = copied > 0 || (Number(batch.steps_done) || 0) > 0
+    ? fillArgs(translate(tr, "transfers.batchInfo", "running for %1 · %2 copied by its transfers"),
+               [batch.elapsed_str || "", formatDataSize(copied, fmt)])
+    : fillArgs(translate(tr, "transfers.batchInfoTime", "running for %1"), [batch.elapsed_str || ""])
+  var parts = []
+  var done = Number(batch.steps_done) || 0
+  if (done > 0) parts.push(fillArgs(translate(tr, "transfers.batchDone", "Steps finished: %1"), [done]))
+  var verified = Number(batch.verified_bytes) || 0
+  if (verified > 0) parts.push(fillArgs(translate(tr, "transfers.batchVerified", "%1 verified"), [formatDataSize(verified, fmt)]))
+  res.steps = parts.join(" · ")
+  return res
+}
+
+// One line for a finished transfer: "rsync (1.2 GB in 3m 05s)". The size or the
+// time can be missing (the collector only knows what it saw). A transfer that
+// ended well before its total: "rsync stopped at 7.2 GB of 20.0 GB"; a whole
+// script: "Batch backup.sh (79.6 GB in 1h 02m)".
+function formatRecentTransfer(item, tr, fmt) {
+  if (!item) return ""
+  var kind = transferKind(item)
+  var size = Number(item.total_bytes) > 0 ? formatDataSize(item.total_bytes, fmt) : ""
   var elapsed = item.elapsed_str ? String(item.elapsed_str) : ""
-  if (size && elapsed) return translate(tr, "transfers.recentLine", "%1 (%2 in %3)").replace("%1", title).replace("%2", size).replace("%3", elapsed)
+  if (kind === "batch") {
+    return fillArgs(translate(tr, "transfers.recentBatch", "Batch %1 (%2 in %3)"),
+                    [neutralizeMarkup(item.name || item.tool || "", 48), size || formatDataSize(0, fmt), elapsed || "?"])
+  }
+  var title = toolDisplayTitle(item.tool, tr)
+  if (kind === "verification") title += " · " + kindLabel(item, tr)
+  if (item.outcome === "stopped" && Number(item.overall_total_bytes) > 0) {
+    return fillArgs(translate(tr, "transfers.recentStopped", "%1 stopped at %2 of %3"),
+                    [title, formatDataSize(item.total_bytes, fmt), formatDataSize(item.overall_total_bytes, fmt)])
+  }
+  if (size && elapsed) return fillArgs(translate(tr, "transfers.recentLine", "%1 (%2 in %3)"), [title, size, elapsed])
   if (size || elapsed) return title + " (" + (size || elapsed) + ")"
   return title
+}
+
+// The icon next to a recent entry: a check, or a warning when it stopped early.
+function recentIcon(item) {
+  if (item && item.outcome === "stopped") return ""
+  if (item && transferKind(item) === "batch") return ""
+  return ""
+}
+
+// The desktop notification for a collector event (events[]), translated, or
+// null when the event should not notify (a step of a batch still running).
+function notificationFor(event, tr, fmt) {
+  if (!event || !event.notify) return null
+  var type = String(event.type || "")
+  var tool = toolDisplayTitle(event.tool, tr)
+  var time = event.elapsed_str ? String(event.elapsed_str) : ""
+  var moved = formatDataSize(event.total_bytes, fmt)
+  var title = ""
+  var body = ""
+  if (type === "transfer_finished") {
+    title = translate(tr, "notify.transferFinished.title", "Transfer finished")
+    body = fillArgs(translate(tr, "notify.transferFinished.body", "%1: %2 in %3"), [tool, moved, time])
+  } else if (type === "transfer_stopped") {
+    title = translate(tr, "notify.transferStopped.title", "Transfer stopped early")
+    body = Number(event.overall_total_bytes) > 0
+      ? fillArgs(translate(tr, "notify.transferStopped.body", "%1 stopped at %2 of %3"), [tool, moved, formatDataSize(event.overall_total_bytes, fmt)])
+      : fillArgs(translate(tr, "transfers.recentLine", "%1 (%2 in %3)"), [tool, moved, time])
+  } else if (type === "verification_finished") {
+    var read = Number(event.verified_bytes) > 0 ? event.verified_bytes : event.total_bytes
+    title = translate(tr, "notify.verifyFinished.title", "Verification finished")
+    body = fillArgs(translate(tr, "notify.verifyFinished.body", "%1: %2 read in %3"), [tool, formatDataSize(read, fmt), time])
+  } else if (type === "batch_finished") {
+    title = translate(tr, "notify.batchFinished.title", "Batch finished")
+    body = fillArgs(translate(tr, "notify.batchFinished.body", "%1: %2 copied in %3"), [String(event.name || event.tool || ""), moved, time])
+  } else {
+    return null
+  }
+  return { title: neutralizeMarkup(title, 80), body: neutralizeMarkup(body, 200) }
 }
 
 // The folder a Disks-tab entry opens. collect-details.sh merges Btrfs
@@ -578,7 +890,10 @@ if (typeof module !== "undefined" && module.exports) {
     parseDetailsOutput: parseDetailsOutput, formatBytes: formatBytes, formatShortBytes: formatShortBytes,
     formatRate: formatRate, formatShortRate: formatShortRate, formatSpeed: formatSpeed,
     formatDuration: formatDuration, translate: translate, toolIcon: toolIcon, toolDisplayTitle: toolDisplayTitle,
-    formatRecentTransfer: formatRecentTransfer, diskOpenPath: diskOpenPath, shortenPath: shortenPath, tildePath: tildePath, transferPath: transferPath, directionArrow: directionArrow,
+    formatRecentTransfer: formatRecentTransfer, formatDataSize: formatDataSize, formatDataRate: formatDataRate,
+    fillArgs: fillArgs, transferKind: transferKind, isCheckKind: isCheckKind, kindLabel: kindLabel, sourceSummary: sourceSummary,
+    overallTotalKind: overallTotalKind, describeOverall: describeOverall, describeScan: describeScan, describePlan: describePlan,
+    describeBatch: describeBatch, recentIcon: recentIcon, notificationFor: notificationFor, diskOpenPath: diskOpenPath, shortenPath: shortenPath, tildePath: tildePath, transferPath: transferPath, directionArrow: directionArrow,
     parseJsonSafely: parseJsonSafely
   }
 }

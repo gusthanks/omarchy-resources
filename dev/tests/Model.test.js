@@ -35,7 +35,9 @@ const {
   MAX_HISTORY, neutralizeMarkup, clamp, pushHistory, parseProcStat, parseProcMeminfo,
   parseProcLoadavg, parseProcUptime, parseProcNetDev, parseProcDiskstats, parseDetailsOutput,
   formatBytes, formatShortBytes, formatRate, formatShortRate, formatSpeed, formatDuration,
-  toolIcon, toolDisplayTitle, formatRecentTransfer, diskOpenPath, shortenPath, tildePath, transferPath, directionArrow, parseJsonSafely
+  toolIcon, toolDisplayTitle, formatRecentTransfer, diskOpenPath, shortenPath, tildePath, transferPath, directionArrow, parseJsonSafely,
+  formatDataSize, formatDataRate, fillArgs, transferKind, isCheckKind, kindLabel, sourceSummary, describeOverall, describeScan,
+  describePlan, describeBatch, recentIcon, notificationFor
 } = mod.exports
 
 describe('gusthx.resources Model.js', () => {
@@ -551,13 +553,294 @@ describe('diskOpenPath', () => {
 describe('formatRecentTransfer', () => {
   const tr = (k, f) => ({ 'transfers.recentLine': '%1 (%2 em %3)' })[k] || f
   it('shows size and time, translated', () => {
-    expect(formatRecentTransfer({ tool: 'rsync', total_bytes: 1536, elapsed_str: '3m 05s' }, tr)).toBe('rsync (1.5 KB em 3m 05s)')
-    expect(formatRecentTransfer({ tool: 'rsync', total_bytes: 1536, elapsed_str: '3m 05s' })).toBe('rsync (1.5 KB in 3m 05s)')
+    // Transfers use SI units, like rsync --stats.
+    expect(formatRecentTransfer({ tool: 'rsync', total_bytes: 1.5e9, elapsed_str: '3m 05s' }, tr)).toBe('rsync (1.50 GB em 3m 05s)')
+    expect(formatRecentTransfer({ tool: 'rsync', total_bytes: 1.5e9, elapsed_str: '3m 05s' })).toBe('rsync (1.50 GB in 3m 05s)')
   })
   it('does not break when the size or the time is missing', () => {
     expect(formatRecentTransfer({ tool: 'cp', total_bytes: 0, elapsed_str: '20s' }, tr)).toBe('cp (20s)')
     expect(formatRecentTransfer({ tool: 'cp', total_bytes: '', elapsed_str: '' }, tr)).toBe('cp')
     expect(formatRecentTransfer(null, tr)).toBe('')
+  })
+})
+
+describe('formatRecentTransfer: outcomes and kinds', () => {
+  it('says how far a stopped transfer got', () => {
+    expect(formatRecentTransfer({ tool: 'rsync', outcome: 'stopped', total_bytes: 7.2e9, overall_total_bytes: 20e9, elapsed_str: '5m' }))
+      .toBe('rsync stopped at 7.20 GB of 20.0 GB')
+  })
+  it('names a finished batch', () => {
+    expect(formatRecentTransfer({ tool: 'batch', kind: 'batch', name: 'nightly.sh', total_bytes: 52.3e9, elapsed_str: '1h 02m' }))
+      .toBe('Batch nightly.sh (52.3 GB in 1h 02m)')
+  })
+  it('marks a verification', () => {
+    expect(formatRecentTransfer({ tool: 'sha256sum', kind: 'verification', total_bytes: 2e9, elapsed_str: '40s' }))
+      .toBe('sha256sum · Verification (2.00 GB in 40s)')
+  })
+  it('picks an icon by outcome', () => {
+    expect(recentIcon({ outcome: 'stopped' })).toBe('')
+    expect(recentIcon({ outcome: 'finished' })).toBe('')
+    expect(recentIcon({})).toBe('')
+  })
+})
+
+describe('SI units for transfers', () => {
+  it('formats sizes in powers of 1000', () => {
+    expect(formatDataSize(1e9)).toBe('1.00 GB')
+    expect(formatDataSize(113e9)).toBe('113.0 GB')
+    expect(formatDataSize(999)).toBe('999 B')
+    expect(formatDataSize(1500)).toBe('2 kB')
+    expect(formatDataSize(523e6)).toBe('523 MB')
+    expect(formatDataSize(1.5e12)).toBe('1.50 TB')
+    expect(formatDataSize(0)).toBe('0 B')
+    expect(formatDataSize(-5)).toBe('0 B')
+  })
+  it('never shows 1000 of a unit', () => {
+    expect(formatDataSize(999600)).toBe('1 MB')
+    expect(formatDataSize(999.97e9)).toBe('1.00 TB')
+  })
+  it('formats rates', () => {
+    expect(formatDataRate(29e6)).toBe('29.0 MB/s')
+    expect(formatDataRate(500)).toBe('500 B/s')
+    expect(formatDataRate(1500)).toBe('2 kB/s')
+    expect(formatDataRate(2.5e9)).toBe('2.50 GB/s')
+    expect(formatDataRate(0)).toBe('0 B/s')
+  })
+  it('uses the locale number formatter', () => {
+    const fmt = (v, d) => Number(v).toFixed(d).replace('.', ',')
+    expect(formatDataSize(113e9, fmt)).toBe('113,0 GB')
+    expect(formatDataRate(29e6, fmt)).toBe('29,0 MB/s')
+  })
+})
+
+describe('fillArgs', () => {
+  it('substitutes every placeholder once', () => {
+    expect(fillArgs('%1 of %2', ['a%2', 'b'])).toBe('a%2 of b')
+    expect(fillArgs('%1 %3', ['x'])).toBe('x %3')
+  })
+})
+
+describe('transfer kinds', () => {
+  it('defaults to a transfer', () => {
+    expect(transferKind({})).toBe('transfer')
+    expect(transferKind(null)).toBe('transfer')
+    expect(kindLabel({})).toBe('')
+    expect(isCheckKind({})).toBe(false)
+  })
+  it('labels dry runs, listings and verifications', () => {
+    expect(kindLabel({ kind: 'simulation' })).toBe('Dry run')
+    expect(kindLabel({ kind: 'listing' })).toBe('Listing')
+    expect(kindLabel({ kind: 'verification', verify_mode: 'check' })).toBe('Verification')
+    expect(kindLabel({ kind: 'verification', verify_mode: 'hash' })).toBe('Computing checksums')
+    expect(isCheckKind({ kind: 'simulation' })).toBe(true)
+    expect(isCheckKind({ kind: 'verification' })).toBe(false)
+    const tr = (k, f) => ({ 'transfers.kind.simulation': 'Simulação' })[k] || f
+    expect(kindLabel({ kind: 'simulation' }, tr)).toBe('Simulação')
+  })
+  it('gives checksum tools their own icon', () => {
+    expect(toolIcon('sha256sum')).toBe('')
+    expect(toolIcon('b2sum')).toBe('')
+    expect(toolIcon('rsync')).toBe('')
+  })
+})
+
+describe('sourceSummary', () => {
+  it('shows one source as is', () => {
+    expect(sourceSummary({ source: '/home/me/a', sources: ['/home/me/a'], source_count: 1 }, '/home/me')).toBe('~/a')
+    expect(sourceSummary({ source: '/home/me/a' }, '/home/me')).toBe('~/a')
+    expect(sourceSummary({ source: '' }, '/home/me')).toBe('')
+  })
+  it('counts the other sources', () => {
+    const sources = ['/src/hermes', '/src/b', '/src/c', '/src/d', '/src/e', '/src/f', '/src/g', '/src/h', '/src/i']
+    expect(sourceSummary({ source: sources[0], sources, source_count: 9 }, '/home/me')).toBe('/src/hermes (+8 more)')
+    const tr = (k, f) => ({ 'transfers.sourcesMore': '%1 (e mais %2)' })[k] || f
+    expect(sourceSummary({ source: sources[0], sources, source_count: 9 }, '/home/me', 38, tr)).toBe('/src/hermes (e mais 8)')
+  })
+})
+
+describe('describeOverall', () => {
+  const base = { total_bytes: 50e9, overall_total_bytes: 100e9, overall_pct: 50 }
+  it('shows an exact total plainly', () => {
+    const o = describeOverall({ ...base, overall_total_kind: 'exact', overall_total_source: 'rsync_dry_run', overall_eta: '5m' })
+    expect(o.show).toBe(true)
+    expect(o.label).toBe('Overall progress')
+    expect(o.line).toBe('50.0 GB / 100.0 GB (50%)')
+    expect(o.line.includes('≈')).toBe(false)
+    expect(o.etaText).toBe('ETA 5m')
+    expect(o.fraction).toBeCloseTo(0.5)
+    expect(o.dim).toBe(false)
+  })
+  it('marks estimates with ≈', () => {
+    const o = describeOverall({ ...base, overall_total_kind: 'estimate', overall_total_source: 'du', overall_eta: '5m' })
+    expect(o.label).toBe('Overall progress (estimate: size of the source)')
+    expect(o.line).toBe('50.0 GB / ≈ 100.0 GB (≈ 50%)')
+    expect(o.etaText).toBe('ETA ≈ 5m (estimate)')
+    expect(describeOverall({ ...base, overall_total_kind: 'estimate', overall_total_source: 'device' }).label)
+      .toBe("Overall progress (estimate: device's used space)")
+    expect(describeOverall({ ...base, overall_total_kind: 'estimate', overall_total_source: 'batch' }).label)
+      .toBe('Overall progress (estimate: what this batch copied)')
+  })
+  it('dims an upper bound and gives no ETA', () => {
+    const o = describeOverall({ ...base, overall_total_kind: 'upper_bound', overall_total_source: 'du', overall_eta: '5m', overall_eta_reason: 'upper_bound' })
+    expect(o.dim).toBe(true)
+    expect(o.label).toBe('Overall progress (at most: size of the sources)')
+    expect(o.line).toBe('50.0 GB / ≤ 100.0 GB (≥ 50%)')
+    expect(o.etaText).toBe('no ETA: the total is only an upper bound')
+  })
+  it('never sticks at 100%: beyond the estimate', () => {
+    const o = describeOverall({ total_bytes: 120e9, overall_total_bytes: 100e9, overall_pct: 99.9, overall_beyond: true,
+      overall_total_kind: 'estimate', overall_total_source: 'du', overall_eta_reason: 'beyond' })
+    expect(o.beyond).toBe(true)
+    expect(o.fraction).toBe(1)
+    expect(o.line).toBe('120.0 GB so far, more than the estimated ≈ 100.0 GB')
+    expect(o.etaText).toBe('')
+    // A legacy payload past its total is beyond too.
+    expect(describeOverall({ total_bytes: 120e9, overall_total_bytes: 100e9, overall_pct: 100, overall_is_estimate: true }).beyond).toBe(true)
+  })
+  it('caps the % below 100 while running', () => {
+    const o = describeOverall({ total_bytes: 100e9, overall_total_bytes: 100e9, overall_pct: 100, overall_total_kind: 'exact', overall_beyond: false })
+    expect(o.line).toBe('100.0 GB / 100.0 GB (99.9%)')
+  })
+  it('explains a missing ETA', () => {
+    const o = (reason) => describeOverall({ ...base, overall_total_kind: 'exact', overall_eta_reason: reason }).etaText
+    expect(o('measuring')).toBe('measuring speed…')
+    expect(o('paused')).toBe('paused, no ETA')
+    expect(o('stalled')).toBe('stalled, no ETA')
+    expect(o('too_long')).toBe('more than 3 days left')
+    expect(o('beyond')).toBe('')
+    expect(o('')).toBe('')
+  })
+  it('shows verification progress by list position', () => {
+    const o = describeOverall({ kind: 'verification', total_bytes: 21e9, overall_total_bytes: 0, overall_pct: 42, progress_basis: 'list',
+      // The collector's real shape: no byte total, so no total kind either.
+      overall_total_kind: '', overall_total_source: '', overall_is_estimate: false, overall_estimate_kind: '',
+      overall_eta: '4m', verify: { list_fraction: 0.42 } })
+    expect(o.show).toBe(true)
+    expect(o.label).toBe('Verification progress (position in the list)')
+    expect(o.line).toBe('42% of the list checked')
+    expect(o.fraction).toBeCloseTo(0.42)
+    expect(o.etaText).toBe('ETA ≈ 4m (estimate)')
+    // A pipe as the list: no fraction, nothing to show.
+    expect(describeOverall({ kind: 'verification', progress_basis: 'list', overall_total_bytes: 0, verify: { list_fraction: -1 } }).show).toBe(false)
+  })
+  it('keeps the old labels for older collectors', () => {
+    expect(describeOverall({ ...base, overall_is_estimate: true, overall_estimate_kind: 'device' }).label).toBe("Overall progress (estimate: device's used space)")
+    expect(describeOverall({ ...base, overall_is_estimate: true, overall_estimate_kind: 'source' }).label).toBe('Overall progress (estimate: size of the source)')
+    expect(describeOverall({ ...base, overall_is_estimate: false }).label).toBe('Overall progress')
+  })
+  it('shows nothing without a total, or for a dry run', () => {
+    expect(describeOverall({ total_bytes: 5, overall_total_bytes: 0 }).show).toBe(false)
+    expect(describeOverall({ ...base, kind: 'simulation', overall_total_kind: 'exact' }).show).toBe(false)
+    expect(describeOverall(null).show).toBe(false)
+  })
+})
+
+describe('describeScan and describePlan', () => {
+  it('describes each scan state', () => {
+    expect(describeScan({ scan: { state: 'queued' } })).toBe('Waiting to work out what is left to copy')
+    expect(describeScan({ scan: { state: 'scanning', found_bytes: 5e9 } })).toBe('Working out what is left to copy… 5.00 GB found so far')
+    expect(describeScan({ scan: { state: 'scanning', found_bytes: 0 } })).toBe('Working out the total size…')
+    expect(describeScan({ scan: { state: 'failed', reason: 'timeout' } })).toBe('Could not work out the total size')
+    expect(describeScan({ scan: { state: 'skipped', reason: 'remote' } })).toBe('Remote transfer: the total is not known')
+    expect(describeScan({ scan: { state: 'done' } })).toBe('')
+    expect(describeScan({ kind: 'simulation', scan: { state: 'queued' } })).toBe('')
+  })
+  it('falls back to overall_scanning', () => {
+    expect(describeScan({ overall_scanning: true })).toBe('Working out the total size…')
+    expect(describeScan({ overall_scanning: false })).toBe('')
+  })
+  it('shows what rsync will copy', () => {
+    const plan = { selection_bytes: 113e9, to_copy_bytes: 68.7e9, already_there_bytes: 44.3e9 }
+    expect(describePlan({ rsync_plan: plan })).toBe('To copy: 68.7 GB (113.0 GB selected, 44.3 GB already at the destination)')
+    expect(describePlan({ rsync_plan: { selection_bytes: 10e9, to_copy_bytes: 4e9 } }))
+      .toBe('To copy: 4.00 GB (10.0 GB selected, 6.00 GB already at the destination)')
+    expect(describePlan({ rsync_plan: null })).toBe('')
+    expect(describePlan({})).toBe('')
+  })
+})
+
+describe('describeBatch', () => {
+  const b = { name: 'copy.sh', state: 'running', phase: 'transfer', transfers: 2, elapsed_str: '23m', total_bytes: 79.6e9 }
+  it('says what the batch is doing', () => {
+    expect(describeBatch({ ...b, state: 'paused' }).status).toBe('paused')
+    expect(describeBatch({ ...b, state: 'paused' }).paused).toBe(true)
+    expect(describeBatch(b).status).toBe('2 running now')
+    expect(describeBatch({ ...b, phase: 'simulation', transfers: 0 }).status).toBe('checking (dry run)')
+    expect(describeBatch({ ...b, phase: 'verification', transfers: 0 }).status).toBe('verifying')
+    expect(describeBatch({ ...b, phase: 'other', transfers: 0, current_commands: ['find', 'sort'] }).status).toBe('between steps: find, sort')
+    expect(describeBatch({ ...b, phase: 'other', transfers: 0, current_commands: [] }).status).toBe('between steps')
+    expect(describeBatch({ ...b, phase: 'other', transfers: 0 }).between).toBe(true)
+  })
+  it('adds up what its transfers copied', () => {
+    expect(describeBatch(b).info).toBe('running for 23m · 79.6 GB copied by its transfers')
+    expect(describeBatch(b).steps).toBe('')
+    expect(describeBatch({ ...b, steps_done: 3, verified_bytes: 50e9 }).steps).toBe('Steps finished: 3 · 50.0 GB verified')
+    expect(describeBatch({ ...b, steps_done: 1 }).steps).toBe('Steps finished: 1')
+  })
+  it('does not claim 0 B copied when it joined a script midway', () => {
+    expect(describeBatch({ ...b, total_bytes: 0 }).info).toBe('running for 23m')
+    expect(describeBatch({ ...b, total_bytes: 0, steps_done: 2 }).info).toBe('running for 23m · 0 B copied by its transfers')
+  })
+})
+
+describe('notificationFor', () => {
+  it('builds each notification', () => {
+    expect(notificationFor({ type: 'transfer_finished', notify: true, tool: 'rsync', total_bytes: 47.4e9, elapsed_str: '27m' }))
+      .toEqual({ title: 'Transfer finished', body: 'rsync: 47.4 GB in 27m' })
+    expect(notificationFor({ type: 'transfer_stopped', notify: true, tool: 'rsync', total_bytes: 7.2e9, overall_total_bytes: 20e9, elapsed_str: '5m' }))
+      .toEqual({ title: 'Transfer stopped early', body: 'rsync stopped at 7.20 GB of 20.0 GB' })
+    expect(notificationFor({ type: 'transfer_stopped', notify: true, tool: 'cp', total_bytes: 7.2e9, overall_total_bytes: 0, elapsed_str: '5m' }).body)
+      .toBe('cp (7.20 GB in 5m)')
+    expect(notificationFor({ type: 'verification_finished', notify: true, tool: 'sha256sum', total_bytes: 1, verified_bytes: 113e9, elapsed_str: '1h 05m' }))
+      .toEqual({ title: 'Verification finished', body: 'sha256sum: 113.0 GB read in 1h 05m' })
+    expect(notificationFor({ type: 'batch_finished', notify: true, name: 'copy.sh', total_bytes: 160e9, elapsed_str: '2h 10m' }))
+      .toEqual({ title: 'Batch finished', body: 'copy.sh: 160.0 GB copied in 2h 10m' })
+  })
+  it('stays quiet when it should', () => {
+    expect(notificationFor({ type: 'transfer_finished', notify: false, tool: 'rsync' })).toBeNull()
+    expect(notificationFor({ type: 'something_else', notify: true })).toBeNull()
+    expect(notificationFor(null)).toBeNull()
+  })
+  it('translates and neutralizes markup', () => {
+    const tr = (k, f) => ({ 'notify.batchFinished.title': 'Lote encerrado', 'notify.batchFinished.body': '%1: %2 copiados em %3' })[k] || f
+    const n = notificationFor({ type: 'batch_finished', notify: true, name: '<b>x</b>&.sh', total_bytes: 1e9, elapsed_str: '1m' }, tr)
+    expect(n.title).toBe('Lote encerrado')
+    expect(n.body.includes('<')).toBe(false)
+    expect(n.body.includes('&')).toBe(false)
+    expect(n.body.endsWith('copiados em 1m')).toBe(true)
+  })
+})
+
+describe('dev/mock/transfers.json', () => {
+  const mock = JSON.parse(readFileSync(join(root, 'dev', 'mock', 'transfers.json'), 'utf8'))
+  it('follows the v2 contract', () => {
+    for (const t of mock.transfers) {
+      expect('kind' in t, `kind in ${t.pid}`).toBe(true)
+      expect('overall_total_kind' in t, `overall_total_kind in ${t.pid}`).toBe(true)
+    }
+    const kinds = mock.transfers.map((t) => t.kind)
+    expect(kinds).toContain('simulation')
+    expect(kinds).toContain('verification')
+    expect(mock.count).toBe(mock.transfers.length)
+    expect(mock.transfer_count + mock.check_count).toBe(mock.count)
+    expect(Array.isArray(mock.events)).toBe(true)
+  })
+  it('has no total kind without a byte total, like the collector', () => {
+    for (const t of mock.transfers) {
+      if (!(t.overall_total_bytes > 0)) {
+        expect(t.overall_total_kind, `overall_total_kind of ${t.pid}`).toBe('')
+        expect(t.overall_total_source, `overall_total_source of ${t.pid}`).toBe('')
+        expect(t.overall_is_estimate, `overall_is_estimate of ${t.pid}`).toBe(false)
+        expect(t.overall_estimate_kind, `overall_estimate_kind of ${t.pid}`).toBe('')
+      }
+    }
+  })
+  it('keeps its aggregates consistent', () => {
+    const copies = mock.transfers.filter((t) => t.kind === 'transfer')
+    expect(mock.agg_total_bytes).toBe(copies.reduce((a, t) => a + t.total_bytes, 0))
+    const b = mock.batches[0]
+    const inBatch = copies.filter((t) => t.batch && t.batch.key === b.key)
+    expect(b.total_bytes).toBe(b.done_bytes + inBatch.reduce((a, t) => a + t.total_bytes, 0))
   })
 })
 

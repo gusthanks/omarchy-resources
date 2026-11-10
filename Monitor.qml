@@ -109,15 +109,26 @@ Item {
     agg_write_speed: 0,
     agg_speed: 0,
     transfers: [],
-    recent_completed: []
+    recent_completed: [],
+    batches: [],
+    events: []
   })
   readonly property var transferList: transferData.transfers || []
   readonly property var recentTransferList: transferData.recent_completed || []
   readonly property int transferCount: transferData.count || 0
+  // count = every listed item; transfer_count / check_count split copies from
+  // dry runs, listings and checksum verifications (older collectors: count).
+  readonly property int transferOnlyCount: transferData.transfer_count !== undefined ? transferData.transfer_count : transferCount
+  readonly property int checkCount: transferData.check_count || 0
   readonly property real aggTransferSpeed: transferData.agg_speed || 0
   readonly property bool hasActiveTransfers: transferCount > 0
   property int selectedTransferIndex: 0
   property string transferStatusMessage: ""
+  // Collector events already notified (by id), so a repeated payload never
+  // notifies twice. The collector only reports; the notification text is
+  // translated here.
+  property var notifiedEventIds: ({})
+  property var notifiedEventOrder: []
 
   readonly property string pluginDir: Qt.resolvedUrl(".").toString().replace(/^file:\/\//, "")
   readonly property string collectorScript: pluginDir + "/collect-details.sh"
@@ -340,9 +351,23 @@ Item {
           var parsed = Model.parseJsonSafely(text, null)
           if (parsed && typeof parsed === "object") {
             root.transferData = parsed
+            root.notifyTransferEvents(parsed.events)
           }
         }
       }
+    }
+  }
+
+  function notifyTransferEvents(events) {
+    if (!root.live || !Array.isArray(events)) return
+    for (var i = 0; i < events.length; i++) {
+      var ev = events[i]
+      if (!ev || !ev.notify || !ev.id || root.notifiedEventIds[ev.id]) continue
+      root.notifiedEventIds[ev.id] = true
+      root.notifiedEventOrder.push(ev.id)
+      while (root.notifiedEventOrder.length > 50) delete root.notifiedEventIds[root.notifiedEventOrder.shift()]
+      var n = Model.notificationFor(ev, root.t, root.fmtNum)
+      if (n) Quickshell.execDetached(["notify-send", "--app-name=" + tr.t("notify.appName"), "-i", "drive-harddisk", "--", n.title, n.body])
     }
   }
 
