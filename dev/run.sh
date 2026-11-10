@@ -10,7 +10,9 @@
 #   dev/run.sh disks        docs/disks.png       (tab 3, with an iPhone)
 #   dev/run.sh sensors      docs/sensors.png     (tab 4)
 #   dev/run.sh transfers    docs/transfers.png   (tab 5: rsync + an iPhone backup)
-#   dev/run.sh docs         all of the captures above, plus preview.png
+#   dev/run.sh gif          docs/demo.gif        (tab 5 with the transfers progressing,
+#                           the batch paused and resumed; needs ffmpeg)
+#   dev/run.sh docs         all of the captures above, plus docs/preview.png
 #   dev/run.sh check        compile every plugin type, Panel.qml included
 #                           (declared, never instantiated); run before deploy
 #   dev/run.sh test         Model.js, catalog and collector tests (node --test and
@@ -57,15 +59,32 @@ render() { # mode out
   [ -f "$2" ] && echo "${2#"$repo"/}" || { echo "no image written for $1 (log: $log)" >&2; return 1; }
 }
 
+gif() {
+  local frames="$cfg/frames"
+  rm -rf "$frames"; mkdir -p "$frames"
+  # One frame is written after the previous one is saved, however slow the
+  # machine is; the GIF plays them back at the rate the harness asks for.
+  MODE=gif OUT="$frames" timeout 300 env HEADLESS=1 QT_QPA_PLATFORM=offscreen QT_SCALE_FACTOR="${DEV_SCALE:-1.6}" \
+    quickshell -n -p "$cfg/shell.qml" >"$cfg/gif.log" 2>&1 || true
+  ls "$frames"/*.png >/dev/null 2>&1 || { echo "no frames written (log: $cfg/gif.log)" >&2; return 1; }
+  local fps; fps=$(cat "$frames/fps" 2>/dev/null || echo 10)
+  ffmpeg -loglevel error -y -framerate "$fps" -i "$frames/%04d.png" \
+    -vf "scale=480:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=96:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle" \
+    "$repo/docs/demo$suffix.gif"
+  echo "docs/demo$suffix.gif ($(ls "$frames"/*.png | wc -l) frames at $fps fps, $(du -h "$repo/docs/demo$suffix.gif" | cut -f1))"
+}
+
 tabs="overview processes disks sensors transfers"
 mkdir -p "$repo/docs"
 case "${1:-preview}" in
   preview) MODE=preview quickshell -n -p "$cfg/shell.qml" ;;
   overview|processes|disks|sensors|transfers) render "$1" "$repo/docs/$1$suffix.png" ;;
+  gif) gif ;;
   docs)
     for m in $tabs; do "$0" "$m"; done
-    # The store/README preview is the overview capture.
-    [ -z "$suffix" ] && cp "$repo/docs/overview.png" "$repo/preview.png" && echo preview.png ;;
+    # The store preview is the overview capture.
+    if [ -z "$suffix" ]; then cp "$repo/docs/overview.png" "$repo/docs/preview.png" && echo docs/preview.png; fi
+    "$0" gif ;;
   test)
     node --test "$repo/dev/tests/"
     python3 -m unittest discover -s "$repo/dev/tests" -p 'test_*.py' ;;
@@ -83,5 +102,5 @@ case "${1:-preview}" in
     grep -a 'CHECK ' "$cfg/check.log" | sed 's/^.*CHECK /CHECK /'
     grep -a 'CHECK ' "$cfg/check.log" | grep -q . || { echo "check produced no output (log: $cfg/check.log)" >&2; exit 1; }
     ! grep -a 'CHECK ' "$cfg/check.log" | grep -vq ' OK$' ;;
-  *) sed -n '2,25p' "$0"; exit 1 ;;
+  *) sed -n '2,27p' "$0"; exit 1 ;;
 esac

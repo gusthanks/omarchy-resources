@@ -23,7 +23,8 @@ render offscreen (Qt's offscreen platform) and save images straight to files.
 ```bash
 dev/run.sh check     # compile every type, Panel.qml included (deploy runs this too)
 dev/run.sh test      # node --test + python3 unittest, no packages
-dev/run.sh docs      # docs/*.png and preview.png from mock data
+dev/run.sh docs      # docs/*.png, docs/preview.png and docs/demo.gif from mock data
+dev/run.sh gif       # just docs/demo.gif (a transfer progressing, the batch paused)
 dev/run.sh preview   # the popup in a window, mock data
 ```
 
