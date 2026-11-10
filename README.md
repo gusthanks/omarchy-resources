@@ -25,18 +25,32 @@ and ETA.
   context switches and uptime.
 - **Transfers**: `rsync`, `rclone`, `scp`, `sftp`, `cp`, `mv`, `dd`, `pv`, `curl`, `wget`,
   `aria2c`, `yt-dlp`, `git`, `idevicebackup2`, `restic`, `borg`, `btrfs`, `pacman`/`yay`/`paru`,
-  `tar`, `zstd` and `ffmpeg` started by you. Each shows speed, the file being copied,
-  overall progress and ETA when the total size is known, and can be paused, resumed,
-  cancelled, opened or copied as a command. A notification tells you when a long transfer
-  finishes. Transfers to or from another machine or a cloud remote (`rclone copy dir gdrive:x`,
-  `rsync dir host:x`, `scp`) are included, marked ↑ or ↓, with the speed measured on the
-  network side. Paths are shown in full (relative ones resolved against the command's working
-  directory), a folder's total size is worked out in the background with `du`, and a card
-  at the top adds everything up. A transfer started by a script (`bash backup.sh`, a
-  Python script, `make`) is shown as a step of that **batch**, with the script's path, how
-  long it has been running and how much it has moved so far; **Pause batch** and **Cancel
-  batch** act on the whole script (cancelling one transfer only ends that step, and the
-  script moves on to the next).
+  `tar`, `zstd` and `ffmpeg` started by you, plus checksum runs (`sha256sum`, `md5sum`,
+  `b2sum`, `b3sum`, `xxhsum`). Each shows speed, the file being copied, overall progress
+  and ETA when the total size is known, and can be paused, resumed, cancelled, opened or
+  copied as a command. A notification tells you when a long transfer finishes. Paths are
+  shown in full (relative ones resolved against the command's working directory), and a
+  card at the top adds everything up.
+  - **Real totals for `rsync`**: for a local copy, rsync itself works out how much is left
+    to copy, with a background `rsync --dry-run --stats` using the same options. Excludes,
+    `--files-from`, every source and what the destination already has are all taken into
+    account, and progress counts the bytes actually written. Folders copied by other tools,
+    and rsync to or from another host, are sized in the background with `du`. When a total
+    is only an upper bound, progress says "at most" and there is no ETA; when a copy goes
+    past its estimate, it says so instead of sitting at 100%.
+  - **Dry runs and listings** (`rsync -n`, `--dry-run`, `-avn`, `--list-only`) show as a
+    quiet *Dry run*: no percentage, no ETA, no size scan and no notification.
+  - **Checksum checks** (`sha256sum`, `md5sum`, `b2sum`, `b3sum`, `xxhsum`, with or without
+    `-c`) show as a verification step with their own progress: how far into the checksum
+    list it is, or how many bytes it has hashed.
+  - **Uploads and downloads** to or from another machine or a cloud remote
+    (`rclone copy dir gdrive:x`, `rsync dir host:x`, `scp`) are marked ↑ or ↓, with the
+    speed measured on the network side.
+  - **Batches**: a transfer started by a script (`bash backup.sh`, a Python script, `make`)
+    is shown as a step of that batch, with the script's path, how long it has been running,
+    what it is doing now (copying, dry run, verifying, between steps) and how much its
+    transfers have moved so far. **Pause batch** and **Cancel batch** act on the whole
+    script (cancelling one transfer only ends that step, and the script moves on to the next).
 - **iPhone/iPad backups** (`idevicebackup2 backup`): the backup size is not known up front,
   so progress and ETA are estimated from the space used on the device and marked with
   **≈** and *(estimate)*.
@@ -44,7 +58,7 @@ and ETA.
 
 <p align="center">
   <img src="docs/overview.png" width="270" alt="The Overview tab: CPU with per-core bars, memory, network, disk I/O and the active transfers">
-  <img src="docs/transfers.png" width="270" alt="Transfers: the combined total and the batch script, an rsync with overall and per-file progress, and an iPhone backup with estimated progress">
+  <img src="docs/transfers.png" width="270" alt="Transfers: the combined total and the batch script, an rsync with its dry-run total, an iPhone backup with estimated progress, an rclone upload, a sha256sum verification and an rsync dry run">
   <img src="docs/processes.png" width="270" alt="Processes sorted by CPU">
 </p>
 <p align="center">
@@ -120,18 +134,32 @@ The bar mode is saved on the widget's entry in `~/.config/omarchy/shell.json`
 Nothing leaves your machine: no network requests, no telemetry, no logs.
 
 What it **reads**: `/proc` (CPU, memory, network and disk counters; for your own processes
-also their command lines, open files under `/proc/<pid>/fd` and I/O counters, to detect
-transfers and the file being copied), `/sys` (temperatures, frequencies, fans, battery),
-`df` and `ps` output, and, when `libimobiledevice` is installed, the name, model and storage
-of connected iPhones/iPads (`idevice_id`, `ideviceinfo`).
+also their command lines, open files under `/proc/<pid>/fd`, file positions under
+`/proc/<pid>/fdinfo` and I/O counters, to detect transfers and the file being copied, and
+the environment in `/proc/<pid>/environ` of an `rsync` dry run, only to tell the plugin's
+own sizing run apart from yours), `/sys` (temperatures, frequencies, fans, battery), `df`
+and `ps` output, and, when `libimobiledevice` is installed, the name, model and storage of
+connected iPhones/iPads (`idevice_id`, `ideviceinfo`).
+
+What it **runs in the background**: to work out a transfer's total size, a helper at the
+lowest priority (`nice 19`, idle I/O class), one scan at a time. It runs `du` on the folders
+a transfer reads and, for a local `rsync` copy only, `rsync --dry-run --stats` with the same
+options, once per command. A dry run only compares the file lists and copies nothing. It is
+never started for an rsync to or from another host, so no extra connection is made.
 
 What it **writes**, only in your per-user runtime directory (`$XDG_RUNTIME_DIR`, normally
 `/run/user/<uid>`, readable only by you, cleared at logout):
 
 - `gusthx-resources-transfers.json`: the transfers seen in the last run (commands, paths,
   byte counters) and the last few finished ones, to compute speeds.
-- `gusthx-resources-size-<pid>-<start>`: the size `du` found for the folders a running
-  transfer reads; removed when the transfer ends.
+- `gusthx-resources-size-rs-<hash>-<pid>-<start>.json` (an rsync dry run) and
+  `gusthx-resources-size-du-<hash>.json` (a `du` scan), each with a matching `.req.json`
+  request file: the command or folders being sized, the state of the scan and the size
+  found. `<hash>` is a short hash of the command or of the folders. They are removed once
+  no transfer needs them: 10 minutes after the rsync ends, or 15 minutes after the `du`
+  scan, so a new copy of the same folders can reuse it.
+- `gusthx-resources-sizing.lock` and `gusthx-resources-collect.lock`: empty lock files, so
+  only one size scan and one collector run at a time.
 - `gusthx-resources-ios.tsv`: connected iPhones/iPads (name, model, storage, UDID), cached
   for 30 seconds.
 

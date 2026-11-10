@@ -28,18 +28,35 @@ iPhone/iPad e mais) com velocidade, progresso e tempo restante.
   da GPU, carga, trocas de contexto e tempo ligado.
 - **Transferências**: `rsync`, `rclone`, `scp`, `sftp`, `cp`, `mv`, `dd`, `pv`, `curl`,
   `wget`, `aria2c`, `yt-dlp`, `git`, `idevicebackup2`, `restic`, `borg`, `btrfs`,
-  `pacman`/`yay`/`paru`, `tar`, `zstd` e `ffmpeg` iniciados por você. Cada uma mostra a
-  velocidade, o arquivo sendo copiado, o progresso geral e o tempo restante quando o tamanho
-  total é conhecido, e pode ser pausada, retomada, cancelada, aberta ou copiada como comando.
-  Uma notificação avisa quando uma transferência longa termina. Transferências de ou para
-  outra máquina ou um remoto na nuvem (`rclone copy dir gdrive:x`, `rsync dir host:x`, `scp`)
-  entram na lista, marcadas com ↑ ou ↓, com a velocidade medida do lado da rede. Os caminhos
-  aparecem completos (os relativos resolvidos a partir da pasta de trabalho do comando), o
-  tamanho total de uma pasta é calculado em segundo plano com `du`, e um cartão no topo soma
-  tudo. Uma transferência iniciada por um script (`bash backup.sh`, um script Python, `make`)
-  aparece como uma etapa desse **lote**, com o caminho do script, há quanto tempo ele roda e
-  quanto já moveu; **Pausar lote** e **Cancelar lote** agem sobre o script inteiro (cancelar
-  uma transferência só encerra aquela etapa, e o script segue para a próxima).
+  `pacman`/`yay`/`paru`, `tar`, `zstd` e `ffmpeg` iniciados por você, além de conferências de
+  checksum (`sha256sum`, `md5sum`, `b2sum`, `b3sum`, `xxhsum`). Cada uma mostra a velocidade,
+  o arquivo sendo copiado, o progresso geral e o tempo restante quando o tamanho total é
+  conhecido, e pode ser pausada, retomada, cancelada, aberta ou copiada como comando. Uma
+  notificação avisa quando uma transferência longa termina. Os caminhos aparecem completos
+  (os relativos resolvidos a partir da pasta de trabalho do comando), e um cartão no topo
+  soma tudo.
+  - **Total real no `rsync`**: numa cópia local, o próprio rsync calcula quanto falta copiar,
+    com um `rsync --dry-run --stats` em segundo plano usando as mesmas opções. Exclusões,
+    `--files-from`, todas as origens e o que o destino já tem entram na conta, e o progresso
+    conta os bytes realmente gravados. Pastas copiadas por outras ferramentas, e o rsync de
+    ou para outra máquina, são medidas em segundo plano com `du`. Quando o total é só um
+    limite máximo, o progresso diz "no máximo" e não há tempo restante; quando uma cópia
+    passa da estimativa, ele avisa em vez de ficar parado em 100%.
+  - **Simulações e listagens** (`rsync -n`, `--dry-run`, `-avn`, `--list-only`) aparecem
+    como uma *Simulação* discreta: sem porcentagem, sem tempo restante, sem medir tamanho e
+    sem notificação.
+  - **Conferências de checksum** (`sha256sum`, `md5sum`, `b2sum`, `b3sum`, `xxhsum`, com ou
+    sem `-c`) aparecem como uma etapa de verificação com progresso próprio: em que ponto da
+    lista de checksums está, ou quantos bytes já calculou.
+  - **Uploads e downloads** de ou para outra máquina ou um remoto na nuvem
+    (`rclone copy dir gdrive:x`, `rsync dir host:x`, `scp`) são marcados com ↑ ou ↓, com a
+    velocidade medida do lado da rede.
+  - **Lotes**: uma transferência iniciada por um script (`bash backup.sh`, um script Python,
+    `make`) aparece como uma etapa desse lote, com o caminho do script, há quanto tempo ele
+    roda, o que está fazendo agora (copiando, simulação, verificando, entre etapas) e quanto
+    as transferências dele já moveram. **Pausar lote** e **Cancelar lote** agem sobre o
+    script inteiro (cancelar uma transferência só encerra aquela etapa, e o script segue para
+    a próxima).
 - **Backups de iPhone/iPad** (`idevicebackup2 backup`): o tamanho do backup não é conhecido
   de antemão, então o progresso e o tempo restante são estimados pelo espaço usado no
   aparelho e marcados com **≈** e *(estimativa)*.
@@ -47,7 +64,7 @@ iPhone/iPad e mais) com velocidade, progresso e tempo restante.
 
 <p align="center">
   <img src="docs/overview.png" width="270" alt="A aba Geral: CPU com barras por núcleo, memória, rede, E/S de disco e as transferências ativas">
-  <img src="docs/transfers-pt-BR.png" width="270" alt="A aba Transferências em português: o total somado e o script do lote, um rsync com progresso geral e por arquivo, e um backup de iPhone com progresso estimado">
+  <img src="docs/transfers-pt-BR.png" width="270" alt="A aba Transferências em português: o total somado e o script do lote, um rsync com o total da simulação, um backup de iPhone com progresso estimado, um upload com rclone, uma verificação com sha256sum e uma simulação do rsync">
   <img src="docs/processes.png" width="270" alt="Processos ordenados por CPU">
 </p>
 <p align="center">
@@ -123,19 +140,35 @@ O modo da barra fica salvo na entrada do widget em `~/.config/omarchy/shell.json
 Nada sai da sua máquina: sem requisições de rede, sem telemetria, sem logs.
 
 O que ele **lê**: `/proc` (contadores de CPU, memória, rede e disco; dos seus próprios
-processos também a linha de comando, os arquivos abertos em `/proc/<pid>/fd` e os contadores
-de E/S, para detectar transferências e o arquivo sendo copiado), `/sys` (temperaturas,
+processos também a linha de comando, os arquivos abertos em `/proc/<pid>/fd`, as posições de
+leitura em `/proc/<pid>/fdinfo` e os contadores de E/S, para detectar transferências e o
+arquivo sendo copiado, e o ambiente em `/proc/<pid>/environ` de um `rsync` em modo de
+simulação, só para distinguir a medição do próprio plugin das suas), `/sys` (temperaturas,
 frequências, ventoinhas, bateria), a saída de `df` e `ps` e, quando o `libimobiledevice` está
 instalado, o nome, o modelo e o armazenamento dos iPhones/iPads conectados (`idevice_id`,
 `ideviceinfo`).
+
+O que ele **roda em segundo plano**: para calcular o tamanho total de uma transferência, um
+auxiliar com a menor prioridade (`nice 19`, classe de E/S ociosa), uma medição por vez. Ele
+roda o `du` nas pastas que uma transferência lê e, só numa cópia local com `rsync`,
+`rsync --dry-run --stats` com as mesmas opções, uma vez por comando. A simulação só compara
+as listas de arquivos e não copia nada. Ela nunca é iniciada para um rsync de ou para outra
+máquina, então nenhuma conexão extra é feita.
 
 O que ele **grava**, só no seu diretório de execução por usuário (`$XDG_RUNTIME_DIR`,
 normalmente `/run/user/<uid>`, legível só por você, limpo ao sair da sessão):
 
 - `gusthx-resources-transfers.json`: as transferências vistas na última leitura (comandos,
   caminhos, contadores de bytes) e as últimas concluídas, para calcular velocidades.
-- `gusthx-resources-size-<pid>-<start>`: o tamanho que o `du` encontrou para as pastas que
-  uma transferência em andamento lê; apagado quando a transferência termina.
+- `gusthx-resources-size-rs-<hash>-<pid>-<start>.json` (uma simulação do rsync) e
+  `gusthx-resources-size-du-<hash>.json` (uma medição do `du`), cada um com um arquivo de
+  pedido `.req.json` correspondente: o comando ou as pastas sendo medidos, o estado da
+  medição e o tamanho encontrado. `<hash>` é um hash curto do comando ou das pastas. Eles são
+  apagados quando nenhuma transferência precisa mais deles: 10 minutos depois que o rsync
+  termina, ou 15 minutos depois da medição do `du`, para que uma nova cópia das mesmas pastas
+  possa reaproveitá-la.
+- `gusthx-resources-sizing.lock` e `gusthx-resources-collect.lock`: arquivos de trava vazios,
+  para que só uma medição e um coletor rodem por vez.
 - `gusthx-resources-ios.tsv`: iPhones/iPads conectados (nome, modelo, armazenamento, UDID),
   guardado por 30 segundos.
 
