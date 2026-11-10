@@ -474,7 +474,7 @@ MemFree:        4096000 kB`
   describe('shortenPath', () => {
     it('handles empty and short paths', () => {
       expect(shortenPath('')).toBe('')
-      expect(shortenPath('/home/gusthx/file.txt')).toBe('/home/gusthx/file.txt')
+      expect(shortenPath('/home/user/file.txt')).toBe('/home/user/file.txt')
     })
     it('keeps the root and the last folders of a long path', () => {
       expect(shortenPath('/mnt/disk/a/b/c/photos/img.tar', 24)).toBe('/mnt/…/photos/img.tar')
