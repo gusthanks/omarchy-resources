@@ -418,7 +418,10 @@ Item {
 
   Timer {
     id: transferSampleTimer
-    interval: root.opened ? 1500 : 3500
+    // The collector walks every process in /proc (~0.5 s of CPU per run on a 2-core
+    // laptop). Closed and idle, poll slowly; keep the quick pace while a copy runs so
+    // the bar badge and "completed" notifications stay timely.
+    interval: root.opened ? 1500 : (root.hasActiveTransfers ? 3500 : 15000)
     running: root.live
     repeat: true
     triggeredOnStart: true

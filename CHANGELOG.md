@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.1 (2026-11-23)
+
+- **Lighter when idle**: with the popup closed and no copy running, the transfer
+  collector now runs every 15 s instead of every 3.5 s. It reads every process in
+  `/proc`, about 0.5 s of CPU per run, so on a 2-core laptop the old pace kept 15 to 20%
+  of a core busy all the time. While a copy is running the pace stays at 3.5 s (1.5 s
+  with the popup open). Trade-off: a copy that starts and ends within those 15 s may not
+  get a "completed" notification.
+
 ## 1.3.0 (2026-11-10)
 
 ### Transfers: follow a copy as it really happens
